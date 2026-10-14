@@ -18,11 +18,16 @@ npm install
 npm run dev        # Vite 개발 서버(5173) + Electron 창
 ```
 
+> Node.js 20 이상이 필요합니다.
+
 앱이 뜨면 **⚙ 설정** 에서 다음을 입력합니다. 키는 코드에 포함되지 않고 사용자 데이터 폴더(`%APPDATA%\ux-reference-studio\settings.json`)에 저장되며, Windows 에서는 DPAPI 로 암호화됩니다.
 
-1. **Anthropic API 키** (필수) 와 모델 (기본 `claude-opus-5-5`)
+1. **Anthropic API 키** (필수) 와 모델 (기본 `claude-opus-5-5`) — https://console.anthropic.com 에서 발급
 2. **Supabase 프로젝트 URL + anon key** (선택). 비워 두면 결과가 이 PC(IndexedDB)에만 저장됩니다.
-   처음 연결할 때 `supabase/schema.sql` 전체를 Supabase **SQL Editor** 에서 실행해 `references` / `notes` 테이블과 `screenshots` 버킷을 만들어 주세요.
+   - https://supabase.com 에서 새 프로젝트 생성 (무료 플랜으로 충분)
+   - 좌측 **SQL Editor** → `supabase/schema.sql` 전체를 붙여넣고 Run → `references` / `notes` 테이블과 `screenshots` 버킷 생성
+   - **Project Settings → API** 에서 `Project URL` 과 `anon public` 키 복사
+   - schema.sql 은 개인용으로 anon 키에 모든 권한을 줍니다. 여러 명이 쓰거나 키가 노출될 수 있으면 Supabase Auth 를 붙이고 정책을 바꾸세요.
 
 키가 없어도 앱은 정상적으로 열리며, 상단 배너와 토스트로 안내만 표시됩니다.
 
