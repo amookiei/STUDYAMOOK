@@ -64,6 +64,19 @@ insights                               { strengths[], improvements[], takeaways[
 | `npm run dist:dir` | 설치 파일 없이 패키징만 (`release/win-unpacked`) |
 | `npm run check` | Electron 쪽 JS 문법 검사 |
 
+## Vercel 웹 배포 (뷰어 모드)
+
+GitHub 저장소를 Vercel 에 연결해 두면 푸시할 때마다 자동으로 배포됩니다. `vercel.json` 이 빌드 설정을 담고 있습니다.
+
+| 항목 | 값 |
+| --- | --- |
+| Framework | Vite |
+| Install | `ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci` (Electron 바이너리 다운로드 생략) |
+| Build | `npm run build` → `dist/` |
+| 브랜치 | PR 브랜치 → Preview, `main` → Production |
+
+웹으로 열면 **뷰어 모드**로 동작합니다. 페이지 캡처와 Claude 분석은 Electron 메인 프로세스에서만 실행되므로 웹에서는 안내만 표시되고, 설정에서 Supabase 를 연결하면 데스크톱 앱에서 저장한 레퍼런스를 보고 코멘트를 추가·수정·삭제할 수 있습니다. 웹 모드의 설정은 브라우저 localStorage 에만 저장되며 Anthropic 키는 저장하지 않습니다.
+
 ## 폴더 구조
 
 ```
@@ -76,8 +89,9 @@ electron/
 src/
   App.jsx        3컬럼 레이아웃, 분석 파이프라인 상태, 코멘트 CRUD
   components/    Library · Screenshot · Wireframe · Analysis · Comments · SettingsModal
-  lib/           bridge(IPC 래퍼) · supabase · localStore(IndexedDB) · store(백엔드 선택)
+  lib/           bridge(IPC 래퍼, 웹 뷰어 모드 폴백) · supabase · localStore(IndexedDB) · store(백엔드 선택)
 supabase/schema.sql
+vercel.json      Vercel 웹 배포 설정
 ```
 
 ## IPC 채널

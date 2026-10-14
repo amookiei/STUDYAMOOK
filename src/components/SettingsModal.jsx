@@ -71,8 +71,13 @@ export default function SettingsModal({ settings, modelOptions, onSave, onClose 
           <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>닫기</button>
         </div>
 
-        <p className="muted">키는 이 PC 의 사용자 데이터 폴더에만 저장되며(가능하면 OS 암호화 사용) 코드에 포함되지 않습니다.</p>
+        {bridge.isElectron ? (
+          <p className="muted">키는 이 PC 의 사용자 데이터 폴더에만 저장되며(가능하면 OS 암호화 사용) 코드에 포함되지 않습니다.</p>
+        ) : (
+          <p className="muted">웹 뷰어 모드: Supabase 정보는 이 브라우저(localStorage)에만 저장됩니다. Anthropic 키와 캡처 설정은 데스크톱 앱에서만 사용합니다.</p>
+        )}
 
+        {bridge.isElectron && (
         <fieldset className="fieldset">
           <legend>Anthropic (Claude 분석)</legend>
           <label className="field">
@@ -90,6 +95,7 @@ export default function SettingsModal({ settings, modelOptions, onSave, onClose 
             <Status value={status.anthropic} />
           </div>
         </fieldset>
+        )}
 
         <fieldset className="fieldset">
           <legend>Supabase (저장소)</legend>
@@ -108,6 +114,7 @@ export default function SettingsModal({ settings, modelOptions, onSave, onClose 
           </div>
         </fieldset>
 
+        {bridge.isElectron && (
         <fieldset className="fieldset">
           <legend>캡처</legend>
           <div className="field__grid">
@@ -121,6 +128,7 @@ export default function SettingsModal({ settings, modelOptions, onSave, onClose 
             </label>
           </div>
         </fieldset>
+        )}
 
         {error && <p className="text-error">{error}</p>}
 

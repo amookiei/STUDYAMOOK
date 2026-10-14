@@ -102,6 +102,10 @@ export default function App() {
     if (job) return;
     const target = url.trim();
     if (!target) { showToast('분석할 URL 을 입력해 주세요.', 'error'); return; }
+    if (!bridge.isElectron) {
+      showToast(bridge.webOnlyMessage, 'error');
+      return;
+    }
     if (!hasApiKey) {
       showToast('Anthropic API 키가 없습니다. 설정에서 키를 입력해 주세요.', 'error');
       setSettingsOpen(true);
@@ -183,7 +187,9 @@ export default function App() {
 
   // ---- 렌더 ----
   const analysis = selected?.analysis || null;
-  const banner = !settings ? null : !hasApiKey
+  const banner = !settings ? null : !bridge.isElectron
+    ? { type: 'info', text: `웹 뷰어 모드입니다. ${bridge.webOnlyMessage} 설정(⚙)에서 Supabase 를 연결하면 저장된 라이브러리를 볼 수 있습니다.` }
+    : !hasApiKey
     ? { type: 'warn', text: 'Anthropic API 키가 설정되지 않아 분석을 실행할 수 없습니다. 설정(⚙)에서 키를 입력하면 바로 사용할 수 있습니다.' }
     : store?.kind !== 'supabase'
       ? { type: 'info', text: 'Supabase 가 설정되지 않아 결과를 이 PC 에만 저장합니다. 설정에서 Supabase URL 과 anon key 를 입력하면 클라우드에 저장됩니다.' }
@@ -277,11 +283,19 @@ export default function App() {
             <div className="workspace__empty">
               <h1>레퍼런스를 분석해 보세요</h1>
               <p>위 입력창에 URL 을 넣고 <strong>분석 시작</strong>을 누르면 페이지를 캡처하고 Claude 가 정보구조·와이어프레임·UX 패턴을 정리합니다.</p>
-              <ol>
-                <li>설정(⚙)에서 Anthropic API 키를 입력합니다.</li>
-                <li>(선택) Supabase URL 과 anon key 를 입력하면 결과가 클라우드에 저장됩니다.</li>
-                <li>URL 을 입력하고 분석을 시작합니다. 1~3분 정도 걸립니다.</li>
-              </ol>
+              {bridge.isElectron ? (
+                <ol>
+                  <li>설정(⚙)에서 Anthropic API 키를 입력합니다.</li>
+                  <li>(선택) Supabase URL 과 anon key 를 입력하면 결과가 클라우드에 저장됩니다.</li>
+                  <li>URL 을 입력하고 분석을 시작합니다. 1~3분 정도 걸립니다.</li>
+                </ol>
+              ) : (
+                <ol>
+                  <li>이 웹 페이지는 저장된 레퍼런스를 보고 코멘트를 남기는 뷰어입니다.</li>
+                  <li>설정(⚙)에서 Supabase URL 과 anon key 를 입력하면 데스크톱 앱에서 저장한 라이브러리가 나타납니다.</li>
+                  <li>새 페이지를 캡처·분석하려면 Windows 데스크톱 앱(<code>npm run dist</code> 로 생성)을 사용하세요.</li>
+                </ol>
+              )}
               {appInfo?.version && <p className="muted small">v{appInfo.version}{appInfo.electron ? ` · Electron ${appInfo.electron}` : ''}</p>}
             </div>
           )}
