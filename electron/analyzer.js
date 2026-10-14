@@ -140,6 +140,30 @@ const TILE_WIDTH = 1100;
 const TILE_HEIGHT = 1500;
 const MAX_TILES = 8;
 
+// 타일 배치 계산(순수 함수). Electron(nativeImage)과 서버(sharp)가 같은 기하를 쓴다.
+function planTiles(originalWidth, originalHeight) {
+  let scale = TILE_WIDTH / originalWidth;
+  // 너무 긴 페이지는 타일 수가 MAX_TILES 를 넘지 않도록 더 축소한다.
+  const maxTotalHeight = TILE_HEIGHT * MAX_TILES;
+  if (originalHeight * scale > maxTotalHeight) scale = maxTotalHeight / originalHeight;
+  const targetWidth = Math.max(1, Math.round(originalWidth * scale));
+  const targetHeight = Math.max(1, Math.round(originalHeight * scale));
+  const tiles = [];
+  for (let y = 0; y < targetHeight && tiles.length < MAX_TILES; y += TILE_HEIGHT) {
+    const h = Math.min(TILE_HEIGHT, targetHeight - y);
+    if (h < 24) break;
+    tiles.push({
+      index: tiles.length + 1,
+      y,
+      height: h,
+      width: targetWidth,
+      fromPct: +((100 * y) / targetHeight).toFixed(1),
+      toPct: +((100 * (y + h)) / targetHeight).toFixed(1),
+    });
+  }
+  return { scale, targetWidth, targetHeight, tiles };
+}
+
 function tileScreenshot(screenshot) {
   const { nativeImage } = require('electron');
   const buffer = Buffer.from(screenshot.base64, 'base64');
@@ -147,30 +171,21 @@ function tileScreenshot(screenshot) {
   if (image.isEmpty()) throw new Error('스크린샷 이미지를 읽을 수 없습니다.');
 
   const original = image.getSize();
-  let scale = TILE_WIDTH / original.width;
-  // 너무 긴 페이지는 타일 수가 MAX_TILES 를 넘지 않도록 더 축소한다.
-  const maxTotalHeight = TILE_HEIGHT * MAX_TILES;
-  if (original.height * scale > maxTotalHeight) scale = maxTotalHeight / original.height;
-  const targetWidth = Math.max(1, Math.round(original.width * scale));
-  const targetHeight = Math.max(1, Math.round(original.height * scale));
-  image = image.resize({ width: targetWidth, height: targetHeight, quality: 'good' });
+  const plan = planTiles(original.width, original.height);
+  image = image.resize({ width: plan.targetWidth, height: plan.targetHeight, quality: 'good' });
 
-  const tiles = [];
-  for (let y = 0; y < targetHeight && tiles.length < MAX_TILES; y += TILE_HEIGHT) {
-    const h = Math.min(TILE_HEIGHT, targetHeight - y);
-    if (h < 24) break;
-    const crop = image.crop({ x: 0, y, width: targetWidth, height: h });
-    tiles.push({
-      index: tiles.length + 1,
-      fromPct: +((100 * y) / targetHeight).toFixed(1),
-      toPct: +((100 * (y + h)) / targetHeight).toFixed(1),
+  return plan.tiles.map((t) => {
+    const crop = image.crop({ x: 0, y: t.y, width: t.width, height: t.height });
+    return {
+      index: t.index,
+      fromPct: t.fromPct,
+      toPct: t.toPct,
       mediaType: 'image/jpeg',
       base64: crop.toJPEG(82).toString('base64'),
-      width: targetWidth,
-      height: h,
-    });
-  }
-  return tiles;
+      width: t.width,
+      height: t.height,
+    };
+  });
 }
 
 // 모델에 보낼 랜드마크 데이터는 토큰을 아끼기 위해 필요한 필드만 남긴다.
@@ -328,12 +343,16 @@ function isCanceled(err) {
  */
 async function analyzeReference(input, deps = {}) {
   const apiKey = String(input.apiKey || '').trim();
-  if (!apiKey) throw new Error('Anthropic API 키가 설정되지 않았습니다. 설정(⚙)에서 키를 입력해 주세요.');
+  if (!apiKey && !deps.client && !hasDefaultCredentials()) {
+    throw new Error('Anthropic API 키가 설정되지 않았습니다. 설정(⚙)에서 키를 입력해 주세요.');
+  }
   if (!input.capture || !input.capture.screenshot) throw new Error('분석할 캡처 데이터가 없습니다.');
 
   const model = String(input.model || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
   const progress = typeof deps.onProgress === 'function' ? deps.onProgress : () => {};
-  const client = deps.client || new Anthropic({ apiKey, maxRetries: 2, timeout: 10 * 60 * 1000 });
+  // apiKey 가 비어 있으면 SDK 가 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN 환경 변수나
+  // `ant auth login` 프로필에서 자격 증명을 찾는다.
+  const client = deps.client || createClient(apiKey, { maxRetries: 2, timeout: 10 * 60 * 1000 });
 
   progress('스크린샷을 분석용 이미지로 변환 중…');
   const tiles = deps.tiles || tileScreenshot(input.capture.screenshot);
@@ -403,10 +422,19 @@ async function runWithFallback(client, params, signal) {
   return stream.finalMessage();
 }
 
+// 설정에 키가 없어도 SDK 기본 자격 증명(환경 변수, `ant auth login` 프로필)을 쓸 수 있는지
+function hasDefaultCredentials() {
+  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_PROFILE || process.env.ANTHROPIC_FEDERATION_RULE_ID);
+}
+
+function createClient(apiKey, options) {
+  return apiKey ? new Anthropic({ apiKey, ...options }) : new Anthropic({ ...options });
+}
+
 async function testConnection({ apiKey, model }) {
   const key = String(apiKey || '').trim();
-  if (!key) throw new Error('Anthropic API 키를 입력해 주세요.');
-  const client = new Anthropic({ apiKey: key, maxRetries: 1, timeout: 20000 });
+  if (!key && !hasDefaultCredentials()) throw new Error('Anthropic API 키를 입력해 주세요.');
+  const client = createClient(key, { maxRetries: 1, timeout: 20000 });
   try {
     const info = await client.models.retrieve(String(model || DEFAULT_MODEL).trim());
     return { ok: true, model: info.id, displayName: info.display_name };
@@ -422,6 +450,8 @@ module.exports = {
   buildUserContent,
   compactLandmarks,
   tileScreenshot,
+  planTiles,
+  hasDefaultCredentials,
   extractJson,
   ANALYSIS_SCHEMA,
   SYSTEM_PROMPT,
@@ -430,4 +460,7 @@ module.exports = {
   BLOCK_TYPES,
   PATTERN_CATEGORIES,
   EVALUATIONS,
+  TILE_WIDTH,
+  TILE_HEIGHT,
+  MAX_TILES,
 };

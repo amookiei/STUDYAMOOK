@@ -66,7 +66,10 @@ export async function uploadScreenshot(client, id, screenshot) {
 }
 
 export async function saveReference(client, { id, capture, analysis, meta }) {
-  const shot = await uploadScreenshot(client, id, capture.screenshot);
+  // 웹 모드에서는 서버(api/capture)가 이미 스토리지에 올렸으므로 그 경로를 그대로 쓴다.
+  const shot = capture.screenshot.path && capture.screenshot.url
+    ? { path: capture.screenshot.path, url: capture.screenshot.url }
+    : await uploadScreenshot(client, id, capture.screenshot);
   const row = {
     id,
     url: capture.url,

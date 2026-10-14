@@ -33,7 +33,11 @@ export default function App() {
   const toastTimer = useRef(null);
 
   const store = useMemo(() => (settings ? createStore(settings) : null), [settings]);
-  const hasApiKey = Boolean(settings?.anthropicApiKey);
+  // 데스크톱: 설정의 키 또는 환경 변수. 웹: 서버(Vercel)에 ANTHROPIC_API_KEY 가 있는지.
+  const hasApiKey = bridge.isElectron
+    ? Boolean(settings?.anthropicApiKey) || Boolean(appInfo?.hasEnvCredentials)
+    : Boolean(appInfo?.server?.anthropicConfigured);
+  const webReady = bridge.isElectron || Boolean(appInfo?.server?.anthropicConfigured && appInfo?.server?.passwordConfigured);
 
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
@@ -103,10 +107,21 @@ export default function App() {
     const target = url.trim();
     if (!target) { showToast('분석할 URL 을 입력해 주세요.', 'error'); return; }
     if (!bridge.isElectron) {
-      showToast(bridge.webOnlyMessage, 'error');
-      return;
-    }
-    if (!hasApiKey) {
+      if (!webReady) {
+        showToast('서버에 ANTHROPIC_API_KEY 와 APP_ACCESS_PASSWORD 환경 변수가 아직 설정되지 않았습니다. Vercel 프로젝트 설정에서 추가해 주세요.', 'error');
+        return;
+      }
+      if (!settings?.accessPassword) {
+        showToast('설정에서 서버 접근 비밀번호를 입력해 주세요.', 'error');
+        setSettingsOpen(true);
+        return;
+      }
+      if (store.kind !== 'supabase') {
+        showToast('웹에서 분석하려면 설정에서 Supabase 를 먼저 연결해 주세요.', 'error');
+        setSettingsOpen(true);
+        return;
+      }
+    } else if (!hasApiKey) {
       showToast('Anthropic API 키가 없습니다. 설정에서 키를 입력해 주세요.', 'error');
       setSettingsOpen(true);
       return;
@@ -115,7 +130,7 @@ export default function App() {
     try {
       const capture = await bridge.capturePage(target);
       setJob({ stage: 'analyze', message: 'Claude 분석 요청 중…' });
-      const { analysis, meta } = await bridge.analyzeReference({ capture });
+      const { analysis, meta } = await bridge.analyzeReference({ capture, model: settings?.anthropicModel });
 
       setJob({ stage: 'save', message: store.kind === 'supabase' ? 'Supabase 에 저장 중…' : '로컬에 저장 중…' });
       const id = newId();
@@ -127,7 +142,7 @@ export default function App() {
         showToast(`저장 실패: ${err.message}`, 'error');
         saved = {
           id, url: capture.url, title: capture.title, analysis, landmarks: capture.landmarks,
-          screenshot_url: `data:image/png;base64,${capture.screenshot.base64}`,
+          screenshot_url: capture.screenshot.url || `data:image/png;base64,${capture.screenshot.base64}`,
           screenshot_width: capture.screenshot.width, screenshot_height: capture.screenshot.height,
           model: meta?.model, created_at: new Date().toISOString(), unsaved: true,
         };
@@ -187,13 +202,24 @@ export default function App() {
 
   // ---- 렌더 ----
   const analysis = selected?.analysis || null;
-  const banner = !settings ? null : !bridge.isElectron
-    ? { type: 'info', text: `웹 뷰어 모드입니다. ${bridge.webOnlyMessage} 설정(⚙)에서 Supabase 를 연결하면 저장된 라이브러리를 볼 수 있습니다.` }
-    : !hasApiKey
-    ? { type: 'warn', text: 'Anthropic API 키가 설정되지 않아 분석을 실행할 수 없습니다. 설정(⚙)에서 키를 입력하면 바로 사용할 수 있습니다.' }
-    : store?.kind !== 'supabase'
-      ? { type: 'info', text: 'Supabase 가 설정되지 않아 결과를 이 PC 에만 저장합니다. 설정에서 Supabase URL 과 anon key 를 입력하면 클라우드에 저장됩니다.' }
-      : null;
+  let banner = null;
+  if (settings) {
+    if (!bridge.isElectron) {
+      if (appInfo && !appInfo.server) {
+        banner = { type: 'warn', text: `서버 API 에 연결하지 못했습니다${appInfo.serverError ? ` (${appInfo.serverError})` : ''}. Vercel 배포 상태를 확인해 주세요.` };
+      } else if (appInfo && !webReady) {
+        banner = { type: 'warn', text: '서버에 ANTHROPIC_API_KEY 와 APP_ACCESS_PASSWORD 환경 변수가 설정되지 않았습니다. Vercel 프로젝트 설정 → Environment Variables 에 추가하고 다시 배포하면 웹에서도 분석할 수 있습니다.' };
+      } else if (!settings.accessPassword) {
+        banner = { type: 'info', text: '웹 모드입니다. 설정(⚙)에서 서버 접근 비밀번호와 Supabase 정보를 입력하면 바로 분석할 수 있습니다.' };
+      } else if (store?.kind !== 'supabase') {
+        banner = { type: 'info', text: '웹에서 분석한 결과는 Supabase 에 저장됩니다. 설정(⚙)에서 Supabase URL 과 anon key 를 입력해 주세요.' };
+      }
+    } else if (!hasApiKey) {
+      banner = { type: 'warn', text: 'Anthropic API 키가 설정되지 않아 분석을 실행할 수 없습니다. 설정(⚙)에서 키를 입력하면 바로 사용할 수 있습니다.' };
+    } else if (store?.kind !== 'supabase') {
+      banner = { type: 'info', text: 'Supabase 가 설정되지 않아 결과를 이 PC 에만 저장합니다. 설정에서 Supabase URL 과 anon key 를 입력하면 클라우드에 저장됩니다.' };
+    }
+  }
 
   return (
     <div className="app">
@@ -291,9 +317,9 @@ export default function App() {
                 </ol>
               ) : (
                 <ol>
-                  <li>이 웹 페이지는 저장된 레퍼런스를 보고 코멘트를 남기는 뷰어입니다.</li>
-                  <li>설정(⚙)에서 Supabase URL 과 anon key 를 입력하면 데스크톱 앱에서 저장한 라이브러리가 나타납니다.</li>
-                  <li>새 페이지를 캡처·분석하려면 Windows 데스크톱 앱(<code>npm run dist</code> 로 생성)을 사용하세요.</li>
+                  <li>설정(⚙)에서 서버 접근 비밀번호(Vercel 의 APP_ACCESS_PASSWORD)를 입력합니다.</li>
+                  <li>Supabase URL 과 anon key 를 입력합니다. 스크린샷과 분석 결과가 Supabase 에 저장됩니다.</li>
+                  <li>URL 을 입력하고 분석을 시작합니다. 서버에서 캡처(10~40초)와 Claude 분석(1~3분)이 진행됩니다.</li>
                 </ol>
               )}
               {appInfo?.version && <p className="muted small">v{appInfo.version}{appInfo.electron ? ` · Electron ${appInfo.electron}` : ''}</p>}
@@ -320,6 +346,7 @@ export default function App() {
         <SettingsModal
           settings={settings}
           modelOptions={appInfo?.modelOptions}
+          appInfo={appInfo}
           onSave={saveSettings}
           onClose={() => setSettingsOpen(false)}
         />

@@ -11,7 +11,9 @@
 - 와이어프레임 블록이나 정보구조 항목을 클릭하면 오른쪽 코멘트 패널에서 해당 섹션이 선택됩니다.
 - 와이어프레임은 "스크린샷 위에 겹쳐 보기" 로 실제 화면과 비교할 수 있습니다.
 
-## 시작하기
+## 시작하기 (데스크톱)
+
+설치 파일을 쓰려면 GitHub **Releases** 에서 `UX Reference Studio-Setup-<버전>.exe` 를 내려받아 설치합니다(아래 "Windows 설치 파일 자동 생성" 참고). 소스로 실행하려면:
 
 ```bash
 npm install
@@ -64,18 +66,52 @@ insights                               { strengths[], improvements[], takeaways[
 | `npm run dist:dir` | 설치 파일 없이 패키징만 (`release/win-unpacked`) |
 | `npm run check` | Electron 쪽 JS 문법 검사 |
 
-## Vercel 웹 배포 (뷰어 모드)
+## 웹 배포 (Vercel)
 
-GitHub 저장소를 Vercel 에 연결해 두면 푸시할 때마다 자동으로 배포됩니다. `vercel.json` 이 빌드 설정을 담고 있습니다.
+GitHub 저장소를 Vercel 에 연결해 두면 푸시할 때마다 자동으로 배포됩니다. `vercel.json` 이 빌드와 함수 설정을 담고 있습니다.
 
 | 항목 | 값 |
 | --- | --- |
-| Framework | Vite |
+| Framework | Vite (정적 프런트엔드) + `api/*.js` 서버리스 함수 |
 | Install | `ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci` (Electron 바이너리 다운로드 생략) |
 | Build | `npm run build` → `dist/` |
 | 브랜치 | PR 브랜치 → Preview, `main` → Production |
 
-웹으로 열면 **뷰어 모드**로 동작합니다. 페이지 캡처와 Claude 분석은 Electron 메인 프로세스에서만 실행되므로 웹에서는 안내만 표시되고, 설정에서 Supabase 를 연결하면 데스크톱 앱에서 저장한 레퍼런스를 보고 코멘트를 추가·수정·삭제할 수 있습니다. 웹 모드의 설정은 브라우저 localStorage 에만 저장되며 Anthropic 키는 저장하지 않습니다.
+### 웹에서 캡처·분석이 동작하게 하려면 (Hobby 플랜 기준)
+
+1. Vercel 프로젝트 → **Settings → Environment Variables** 에 두 값을 추가하고 다시 배포합니다.
+   | 변수 | 값 |
+   | --- | --- |
+   | `ANTHROPIC_API_KEY` | Anthropic 콘솔에서 발급한 키. 브라우저에는 절대 내려가지 않고 서버 함수만 사용합니다. |
+   | `APP_ACCESS_PASSWORD` | 아무 문자열. 이 비밀번호를 아는 사람만 분석을 실행할 수 있어 키 비용을 보호합니다. |
+2. 배포된 사이트의 설정(⚙)에서 **서버 접근 비밀번호**, **Supabase URL / anon key** 를 입력합니다. 스크린샷과 결과는 Supabase 에 저장됩니다(`supabase/schema.sql` 실행 필요).
+3. URL 을 입력하고 **분석 시작**. 서버에서 캡처(10~40초)와 Claude 분석(1~3분)이 차례로 진행됩니다.
+
+서버리스 함수 구성:
+
+| 함수 | 역할 | 제한 |
+| --- | --- | --- |
+| `api/capture.js` | 헤드리스 Chromium(@sparticuz/chromium + playwright-core)으로 렌더링 → 랜드마크 추출 → 스크롤 분할 캡처를 sharp 로 이어 붙여 Supabase 스토리지에 업로드 | 최대 120초, 폭 1920px·높이 12000px |
+| `api/analyze.js` | 스토리지의 PNG 를 내려받아 타일로 자르고 Claude 호출 | 최대 300초 (Hobby 의 Fluid compute 상한) |
+| `api/health.js` | 서버 설정 상태, 모델 목록, 연결 테스트 | |
+
+- 내부망/사설 IP 주소 캡처는 서버에서 차단합니다(SSRF 방지).
+- 함수 실행 시간이 300초를 넘기면 Vercel 이 요청을 끊습니다. 긴 페이지는 설정의 최대 캡처 높이를 줄이거나 Sonnet/Haiku 모델을 쓰세요.
+- 로컬에서 함수를 시험할 때는 `CHROMIUM_PATH`(로컬 Chromium 경로), `UX_ALLOW_PRIVATE_URL=1`, `UX_ALLOW_HTTP_SCREENSHOT=1` 환경 변수를 쓸 수 있습니다. 운영 배포에서는 설정하지 마세요.
+
+## Windows 설치 파일 자동 생성 (GitHub Actions)
+
+`.github/workflows/windows-installer.yml` 이 Windows 러너에서 `npm run dist` 를 실행합니다.
+
+- 태그를 푸시하면(`git tag v0.1.0 && git push origin v0.1.0`) 빌드 후 GitHub **Release** 에 `.exe` 가 첨부됩니다.
+- Actions 탭 → "Windows installer" → **Run workflow** 로 수동 실행하면 Artifacts 에서 내려받을 수 있습니다.
+
+## API 키 없이 쓸 수 있나?
+
+Claude 호출에는 Anthropic 계정의 자격 증명이 반드시 필요합니다. 다만 "설정 화면에 키를 붙여넣는" 방식 말고도 다음이 됩니다.
+
+- **데스크톱**: 설정의 키를 비워 두면 SDK 가 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` 환경 변수나 `ant auth login` 으로 만든 프로필(`~/.config/anthropic/`)을 자동으로 씁니다.
+- **웹**: 키는 Vercel 환경 변수에만 있고 사용자는 접근 비밀번호만 입력합니다. 장기 키 대신 Vercel OIDC 와 Anthropic Workload Identity Federation 을 연결해 단기 토큰을 쓰는 방법도 있습니다.
 
 ## 폴더 구조
 
@@ -89,9 +125,12 @@ electron/
 src/
   App.jsx        3컬럼 레이아웃, 분석 파이프라인 상태, 코멘트 CRUD
   components/    Library · Screenshot · Wireframe · Analysis · Comments · SettingsModal
-  lib/           bridge(IPC 래퍼, 웹 뷰어 모드 폴백) · supabase · localStore(IndexedDB) · store(백엔드 선택)
+  lib/           bridge(IPC 래퍼, 웹 모드에서는 /api 호출) · supabase · localStore(IndexedDB) · store(백엔드 선택)
+shared/extract.js  DOM 랜드마크 추출 스크립트, URL 검사 (Electron / 서버 공용)
+api/             Vercel 서버리스 함수 (capture, analyze, health, _lib)
 supabase/schema.sql
 vercel.json      Vercel 웹 배포 설정
+.github/workflows/windows-installer.yml  Windows 설치 파일 빌드
 ```
 
 ## IPC 채널

@@ -8,7 +8,7 @@ const FALLBACK_MODELS = [
   { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5 (가장 저렴)' },
 ];
 
-export default function SettingsModal({ settings, modelOptions, onSave, onClose }) {
+export default function SettingsModal({ settings, modelOptions, appInfo, onSave, onClose }) {
   const [form, setForm] = useState({ ...settings });
   const [status, setStatus] = useState({ anthropic: null, supabase: null });
   const [saving, setSaving] = useState(false);
@@ -28,6 +28,7 @@ export default function SettingsModal({ settings, modelOptions, onSave, onClose 
   const testAnthropic = async () => {
     setStatus((s) => ({ ...s, anthropic: { state: 'loading' } }));
     try {
+      if (!bridge.isElectron) await bridge.saveSettings({ accessPassword: form.accessPassword });
       const r = await bridge.testAnthropic({ apiKey: form.anthropicApiKey, model: form.anthropicModel });
       setStatus((s) => ({ ...s, anthropic: { state: 'ok', message: `연결 성공: ${r.displayName || r.model}` } }));
     } catch (err) {
@@ -74,7 +75,32 @@ export default function SettingsModal({ settings, modelOptions, onSave, onClose 
         {bridge.isElectron ? (
           <p className="muted">키는 이 PC 의 사용자 데이터 폴더에만 저장되며(가능하면 OS 암호화 사용) 코드에 포함되지 않습니다.</p>
         ) : (
-          <p className="muted">웹 뷰어 모드: Supabase 정보는 이 브라우저(localStorage)에만 저장됩니다. Anthropic 키와 캡처 설정은 데스크톱 앱에서만 사용합니다.</p>
+          <p className="muted">웹 모드: 아래 값은 이 브라우저(localStorage)에만 저장됩니다. Anthropic 키는 브라우저에 두지 않고 Vercel 환경 변수 <code>ANTHROPIC_API_KEY</code> 를 서버가 사용합니다.</p>
+        )}
+
+        {!bridge.isElectron && (
+        <fieldset className="fieldset">
+          <legend>서버 (Vercel)</legend>
+          <label className="field">
+            <span className="field__label">접근 비밀번호 (APP_ACCESS_PASSWORD)</span>
+            <input className="input" type="password" placeholder="Vercel 환경 변수에 설정한 값" value={form.accessPassword || ''} onChange={set('accessPassword')} autoComplete="off" />
+          </label>
+          <label className="field">
+            <span className="field__label">모델</span>
+            <select className="input" value={form.anthropicModel || models[0].id} onChange={set('anthropicModel')}>
+              {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </label>
+          <p className="muted small">
+            서버 상태: {appInfo?.server
+              ? `Anthropic 키 ${appInfo.server.anthropicConfigured ? '설정됨' : '없음'} · 접근 비밀번호 ${appInfo.server.passwordConfigured ? '설정됨' : '없음'}`
+              : '확인할 수 없음'}
+          </p>
+          <div className="field__row">
+            <button type="button" className="btn btn--sm" onClick={testAnthropic} disabled={!form.accessPassword}>연결 테스트</button>
+            <Status value={status.anthropic} />
+          </div>
+        </fieldset>
         )}
 
         {bridge.isElectron && (
@@ -91,9 +117,10 @@ export default function SettingsModal({ settings, modelOptions, onSave, onClose 
             </select>
           </label>
           <div className="field__row">
-            <button type="button" className="btn btn--sm" onClick={testAnthropic} disabled={!form.anthropicApiKey}>연결 테스트</button>
+            <button type="button" className="btn btn--sm" onClick={testAnthropic} disabled={!form.anthropicApiKey && !appInfo?.hasEnvCredentials}>연결 테스트</button>
             <Status value={status.anthropic} />
           </div>
+          {appInfo?.hasEnvCredentials && <p className="muted small">환경 변수(ANTHROPIC_API_KEY 등)의 자격 증명이 감지되어 키를 비워 두어도 사용할 수 있습니다.</p>}
         </fieldset>
         )}
 
@@ -114,7 +141,6 @@ export default function SettingsModal({ settings, modelOptions, onSave, onClose 
           </div>
         </fieldset>
 
-        {bridge.isElectron && (
         <fieldset className="fieldset">
           <legend>캡처</legend>
           <div className="field__grid">
@@ -127,8 +153,8 @@ export default function SettingsModal({ settings, modelOptions, onSave, onClose 
               <input className="input" type="number" min={2000} max={30000} value={form.captureMaxHeight ?? 12000} onChange={set('captureMaxHeight')} />
             </label>
           </div>
+          {!bridge.isElectron && <p className="muted small">웹에서는 서버 실행 시간 제한 때문에 폭 1920px, 높이 12000px 까지만 적용됩니다.</p>}
         </fieldset>
-        )}
 
         {error && <p className="text-error">{error}</p>}
 
