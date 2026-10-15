@@ -1,7 +1,7 @@
 // Supabase 가 설정되지 않았을 때 쓰는 로컬(IndexedDB) 저장소.
 // 같은 PC 안에서만 유지되며, Supabase 를 설정하면 그쪽이 우선된다.
 const DB_NAME = 'ux-reference-studio';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -13,6 +13,7 @@ function openDb() {
         const notes = db.createObjectStore('notes', { keyPath: 'id' });
         notes.createIndex('reference_id', 'reference_id', { unique: false });
       }
+      if (!db.objectStoreNames.contains('studies')) db.createObjectStore('studies', { keyPath: 'reference_id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error || new Error('IndexedDB 를 열 수 없습니다.'));
@@ -78,6 +79,20 @@ export async function deleteReference(reference) {
   await tx(db, 'references', 'readwrite', (s) => s.delete(reference.id));
   const notes = await listNotes(reference.id);
   await tx(db, 'notes', 'readwrite', (s) => { notes.forEach((n) => s.delete(n.id)); });
+  await tx(db, 'studies', 'readwrite', (s) => s.delete(reference.id));
+}
+
+// ---------------- studies ----------------
+export async function getStudy(referenceId) {
+  const db = await openDb();
+  const row = await tx(db, 'studies', 'readonly', (s) => s.get(referenceId));
+  return row ? row.data : null;
+}
+
+export async function saveStudy(referenceId, study) {
+  const db = await openDb();
+  await tx(db, 'studies', 'readwrite', (s) => s.put({ reference_id: referenceId, data: study, updated_at: new Date().toISOString() }));
+  return study;
 }
 
 export async function listNotes(referenceId) {

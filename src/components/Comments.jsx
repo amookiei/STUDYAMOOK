@@ -47,13 +47,23 @@ function NoteItem({ note, onUpdate, onDelete, busy }) {
   );
 }
 
-export default function Comments({ reference, analysis, notes, selectedSectionId, onSelectSection, onAdd, onUpdate, onDelete, busy }) {
+export default function Comments({ reference, sections: sectionsProp, notes, selectedSectionId, onSelectSection, onAdd, onUpdate, onDelete, busy }) {
   const [draft, setDraft] = useState('');
 
+  // sections: [{ id, name, level, group }] — App 에서 내 IA 노드와 (공개된) AI 섹션을 합쳐 넘긴다.
   const sections = useMemo(() => {
-    const list = (analysis?.information_architecture?.hierarchy || []).map((s) => ({ id: s.id, name: s.name, level: s.level }));
-    return [GENERAL_SECTION, ...list];
-  }, [analysis]);
+    const list = sectionsProp && sectionsProp.length ? sectionsProp : [GENERAL_SECTION];
+    return list.some((s) => s.id === GENERAL_SECTION.id) ? list : [GENERAL_SECTION, ...list];
+  }, [sectionsProp]);
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const s of sections) {
+      const key = s.group || '';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(s);
+    }
+    return Array.from(map.entries());
+  }, [sections]);
 
   const currentId = sections.some((s) => s.id === selectedSectionId) ? selectedSectionId : GENERAL_SECTION.id;
   const current = sections.find((s) => s.id === currentId) || GENERAL_SECTION;
@@ -74,7 +84,7 @@ export default function Comments({ reference, analysis, notes, selectedSectionId
     return (
       <aside className="comments">
         <h2>코멘트</h2>
-        <p className="muted">레퍼런스를 선택하거나 새로 분석하면 섹션별로 코멘트를 남길 수 있습니다.</p>
+        <p className="muted">레퍼런스를 선택하거나 새로 분석하면 섹션별로 코멘트를 남길 수 있습니다. 내 IA 노드와 (공개 후) AI 섹션별로 메모가 묶이고, LinkedIn 초안에 함께 들어갑니다.</p>
       </aside>
     );
   }
@@ -96,12 +106,15 @@ export default function Comments({ reference, analysis, notes, selectedSectionId
       <label className="field">
         <span className="field__label">섹션</span>
         <select className="input" value={currentId} onChange={(e) => onSelectSection(e.target.value)}>
-          {sections.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.level ? `${'　'.repeat(Math.max(0, s.level - 1))}${s.name}` : s.name}
-              {grouped.get(s.id)?.length ? ` (${grouped.get(s.id).length})` : ''}
-            </option>
-          ))}
+          {groups.map(([group, list]) => {
+            const options = list.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.level ? `${'　'.repeat(Math.max(0, s.level - 1))}${s.name}` : s.name}
+                {grouped.get(s.id)?.length ? ` (${grouped.get(s.id).length})` : ''}
+              </option>
+            ));
+            return group ? <optgroup key={group} label={group}>{options}</optgroup> : options;
+          })}
         </select>
       </label>
 

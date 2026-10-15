@@ -1,5 +1,5 @@
 // Supabase 데이터 접근 계층.
-// 테이블: references, notes / 스토리지 버킷: screenshots (supabase/schema.sql 참고)
+// 테이블: references, notes, studies / 스토리지 버킷: screenshots (supabase/schema.sql 참고)
 import { createClient } from '@supabase/supabase-js';
 import { resolveSupabase } from './config';
 
@@ -147,11 +147,30 @@ export async function deleteNote(client, id) {
   throwIf(error, '코멘트 삭제에 실패했습니다');
 }
 
+// ---------------- studies (학습 기록: 내 와이어프레임 / IA / 비교 글) ----------------
+export async function getStudy(client, referenceId) {
+  const { data, error } = await client.from('studies').select('data, updated_at').eq('reference_id', referenceId).maybeSingle();
+  throwIf(error, '학습 기록을 불러오지 못했습니다');
+  return data ? data.data : null;
+}
+
+export async function saveStudy(client, referenceId, study) {
+  const { data, error } = await client
+    .from('studies')
+    .upsert({ reference_id: referenceId, data: study, updated_at: new Date().toISOString() }, { onConflict: 'reference_id' })
+    .select('data')
+    .single();
+  throwIf(error, '학습 기록 저장에 실패했습니다');
+  return data ? data.data : study;
+}
+
 export async function testSupabase(settings) {
   const client = getSupabaseClient(settings);
   if (!client) throw new Error('Supabase URL 과 anon key 를 모두 입력하거나, 환경 변수(VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)로 미리 설정해 주세요.');
   const { error } = await client.from('references').select('id', { count: 'exact', head: true });
   throwIf(error, 'Supabase 연결 실패');
+  const { error: studiesError } = await client.from('studies').select('reference_id', { count: 'exact', head: true });
+  throwIf(studiesError, 'studies 테이블 확인 실패 (schema.sql 을 다시 실행하면 추가됩니다)');
   const { error: bucketError } = await client.storage.from(SCREENSHOT_BUCKET).list('', { limit: 1 });
   if (bucketError) throw new Error(`"${SCREENSHOT_BUCKET}" 버킷에 접근할 수 없습니다: ${bucketError.message}`);
   return true;
