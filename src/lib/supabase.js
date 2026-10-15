@@ -5,7 +5,7 @@ import { resolveSupabase } from './config';
 
 export const SCREENSHOT_BUCKET = 'screenshots';
 
-let cached = { key: '', client: null };
+let cached = { key: '', client: null, url: '' };
 
 export function isSupabaseConfigured(settings) {
   return Boolean(resolveSupabase(settings));
@@ -19,14 +19,15 @@ export function getSupabaseClient(settings) {
   const client = createClient(resolved.url, resolved.anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  cached = { key, client };
+  cached = { key, client, url: resolved.url };
   return client;
 }
 
 function throwIf(error, context) {
   if (error) {
+    const host = (() => { try { return new URL(cached.url).host; } catch { return ''; } })();
     const hint = /relation .* does not exist|Could not find the table/i.test(error.message || '')
-      ? ' — supabase/schema.sql 을 Supabase SQL Editor 에서 실행했는지 확인해 주세요.'
+      ? ` — 연결 중인 프로젝트(${host || '알 수 없음'})에 테이블이 없습니다. 이 프로젝트의 SQL Editor 에서 supabase/schema.sql 전체를 실행했는지, Table Editor 에 references/notes 테이블이 보이는지 확인해 주세요. 테이블이 있는데도 이 오류가 나면 SQL Editor 에서 notify pgrst, 'reload schema'; 를 실행해 보세요.`
       : '';
     throw new Error(`${context}: ${error.message || error}${hint}`);
   }
@@ -62,6 +63,15 @@ export async function uploadScreenshot(client, id, screenshot) {
     contentType: screenshot.mimeType || 'image/png',
     upsert: true,
   });
+  throwIf(error, '스크린샷 업로드에 실패했습니다');
+  const { data } = client.storage.from(SCREENSHOT_BUCKET).getPublicUrl(path);
+  return { path, url: data.publicUrl };
+}
+
+// 사용자가 직접 올린 스크린샷(Blob)을 스토리지에 올린다 (웹 모드: 서버가 이 URL 에서 내려받아 분석)
+export async function uploadScreenshotBlob(client, id, blob) {
+  const path = `${id}.png`;
+  const { error } = await client.storage.from(SCREENSHOT_BUCKET).upload(path, blob, { contentType: 'image/png', upsert: true });
   throwIf(error, '스크린샷 업로드에 실패했습니다');
   const { data } = client.storage.from(SCREENSHOT_BUCKET).getPublicUrl(path);
   return { path, url: data.publicUrl };

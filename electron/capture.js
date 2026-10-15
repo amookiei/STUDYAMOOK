@@ -3,7 +3,7 @@
 //  2) 전체 페이지 스크린샷(PNG, base64)을 찍는다.
 const { BrowserWindow, session, nativeImage } = require('electron');
 const {
-  USER_AGENT, EXTRACT_SCRIPT, HIDE_FIXED_SCRIPT, RESTORE_FIXED_SCRIPT, HIDE_SCROLLBAR_CSS, normalizeUrl,
+  USER_AGENT, EXTRACT_SCRIPT, HIDE_FIXED_SCRIPT, RESTORE_FIXED_SCRIPT, HIDE_SCROLLBAR_CSS, normalizeUrl, rescaleLandmarksToCapture,
 } = require('../shared/extract');
 
 const CAPTURE_PARTITION = 'persist:ux-capture';
@@ -130,6 +130,7 @@ async function capturePage(inputUrl, options = {}) {
     const pageHeight = Math.min(maxHeight, Math.max(600, landmarks.page.height));
     landmarks.page.capturedHeight = pageHeight;
     landmarks.page.truncated = landmarks.page.height > maxHeight;
+    rescaleLandmarksToCapture(landmarks, landmarks.page.width || width, pageHeight);
 
     progress('전체 스크린샷 촬영 중…');
     const shot = await captureFullPage(win, width, pageHeight, landmarks.viewport.height || VIEWPORT_HEIGHT);

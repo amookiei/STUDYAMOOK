@@ -8,7 +8,7 @@ const { readJson, send, fail, requireAccess, methodNotAllowed } = require('./_li
 const { launchBrowser } = require('./_lib/browser');
 const { createServerClient, uploadScreenshot } = require('./_lib/supabase');
 const {
-  USER_AGENT, EXTRACT_SCRIPT, HIDE_FIXED_SCRIPT, RESTORE_FIXED_SCRIPT, HIDE_SCROLLBAR_CSS, normalizeUrl, assertPublicUrl,
+  USER_AGENT, EXTRACT_SCRIPT, HIDE_FIXED_SCRIPT, RESTORE_FIXED_SCRIPT, HIDE_SCROLLBAR_CSS, normalizeUrl, assertPublicUrl, rescaleLandmarksToCapture,
 } = require('../shared/extract');
 
 const VIEWPORT_HEIGHT = 900;
@@ -100,7 +100,7 @@ module.exports = async (req, res) => {
       await page.goto(url, { waitUntil: 'load', timeout: 30000 });
     } catch (err) {
       const msg = /timeout/i.test(err.message) ? '페이지 로딩이 30초 안에 끝나지 않았습니다.' : `페이지를 불러오지 못했습니다 (${err.message.split('\n')[0]}).`;
-      return fail(res, 502, msg);
+      return fail(res, 502, `${msg} 봇 차단이 있는 사이트라면 브라우저에서 전체 페이지 스크린샷을 찍어 "스크린샷 업로드"로 분석해 보세요.`);
     }
     await page.addStyleTag({ content: HIDE_SCROLLBAR_CSS }).catch(() => {});
     await sleep(1000);
@@ -111,6 +111,7 @@ module.exports = async (req, res) => {
     const pageHeight = Math.min(maxHeight, Math.max(600, landmarks.page.height));
     landmarks.page.capturedHeight = pageHeight;
     landmarks.page.truncated = landmarks.page.height > maxHeight;
+    rescaleLandmarksToCapture(landmarks, landmarks.page.width || width, pageHeight);
 
     const shot = await captureFullPage(page, width, pageHeight, landmarks.viewport.height || VIEWPORT_HEIGHT);
     await context.close();
