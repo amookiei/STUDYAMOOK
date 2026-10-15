@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import bridge from '../lib/bridge';
 import { testSupabase } from '../lib/supabase';
-import { PRESET, hasPresetSupabase } from '../lib/config';
+import { PRESET, hasPresetSupabase, normalizeSupabaseUrl } from '../lib/config';
 
 const FALLBACK_MODELS = [
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 (기본, 가장 정확)' },
@@ -128,6 +128,9 @@ export default function SettingsModal({ settings, modelOptions, appInfo, onSave,
           <label className="field">
             <span className="field__label">프로젝트 URL</span>
             <input className="input" placeholder={hasPresetSupabase ? '비워 두면 환경 변수 값 사용' : 'https://xxxx.supabase.co'} value={form.supabaseUrl || ''} onChange={set('supabaseUrl')} />
+            {form.supabaseUrl && normalizeSupabaseUrl(form.supabaseUrl) !== form.supabaseUrl.trim() && (
+              <span className="muted small">→ <code>{normalizeSupabaseUrl(form.supabaseUrl)}</code> 로 사용됩니다 (Settings → API 의 Project URL)</span>
+            )}
           </label>
           <label className="field">
             <span className="field__label">anon key</span>
