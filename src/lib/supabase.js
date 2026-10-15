@@ -68,6 +68,15 @@ export async function uploadScreenshot(client, id, screenshot) {
   return { path, url: data.publicUrl };
 }
 
+// 사용자가 직접 올린 스크린샷(Blob)을 스토리지에 올린다 (웹 모드: 서버가 이 URL 에서 내려받아 분석)
+export async function uploadScreenshotBlob(client, id, blob) {
+  const path = `${id}.png`;
+  const { error } = await client.storage.from(SCREENSHOT_BUCKET).upload(path, blob, { contentType: 'image/png', upsert: true });
+  throwIf(error, '스크린샷 업로드에 실패했습니다');
+  const { data } = client.storage.from(SCREENSHOT_BUCKET).getPublicUrl(path);
+  return { path, url: data.publicUrl };
+}
+
 export async function saveReference(client, { id, capture, analysis, meta }) {
   // 웹 모드에서는 서버(api/capture)가 이미 스토리지에 올렸으므로 그 경로를 그대로 쓴다.
   const shot = capture.screenshot.path && capture.screenshot.url

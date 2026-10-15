@@ -15,6 +15,7 @@ export function createStore(settings) {
       addNote: (input) => supa.addNote(client, input),
       updateNote: (id, body) => supa.updateNote(client, id, body),
       deleteNote: (id) => supa.deleteNote(client, id),
+      uploadScreenshotBlob: (id, blob) => supa.uploadScreenshotBlob(client, id, blob),
     };
   }
   return {

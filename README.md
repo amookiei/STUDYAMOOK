@@ -9,7 +9,7 @@
 | 레퍼런스 라이브러리 (검색, 선택, 삭제) | 스크린샷 · 와이어프레임 · 분석 탭 | 섹션별 코멘트 (추가 / 수정 / 삭제) |
 
 - 와이어프레임 블록이나 정보구조 항목을 클릭하면 오른쪽 코멘트 패널에서 해당 섹션이 선택됩니다.
-- 와이어프레임은 "스크린샷 위에 겹쳐 보기" 로 실제 화면과 비교할 수 있습니다.
+- 와이어프레임 블록은 DOM 에서 실측한 랜드마크 위치에 맞춰 그려집니다(실선). 랜드마크가 없는 영역은 모델이 추정한 위치(점선)입니다. "스크린샷 위에 겹쳐 보기" 와 투명도 슬라이더로 실제 화면과 비교할 수 있습니다.
 
 ## 시작하기 (데스크톱)
 
@@ -35,7 +35,7 @@ npm run dev        # Vite 개발 서버(5173) + Electron 창
 
 ## 분석 흐름
 
-1. URL 입력 → **분석 시작**
+1. URL 입력 → **분석 시작** (봇 차단 등으로 캡처가 안 되는 페이지는 브라우저 개발자 도구나 확장 프로그램으로 **전체 페이지 스크린샷**을 찍어 **스크린샷 업로드** 버튼으로 올리면 DOM 데이터 없이 이미지만으로 분석합니다)
 2. `electron/capture.js` — 숨김 BrowserWindow 로 페이지 로드 → lazy-load 를 위해 자동 스크롤 → 랜드마크(header/nav/main/aside/footer/section/form/role=…) 추출 → 뷰포트 단위로 스크롤하며 찍은 비트맵을 이어 붙여 전체 스크린샷 생성 (fixed/sticky 요소 반복 방지, 스크롤바 숨김)
 3. `electron/analyzer.js` — 스크린샷을 1100px 폭으로 축소해 세로 1500px 타일(최대 8장)로 자르고, 랜드마크 JSON 과 함께 Claude 에 전송. **Structured Outputs(`output_config.format: json_schema`)** 로 `ANALYSIS_SCHEMA` 에 맞는 JSON 을 받고 `normalizeAnalysis()` 로 좌표·enum 을 보정
 4. `src/lib/supabase.js` — `screenshots` 버킷에 PNG 업로드 → `references` 행 insert → 라이브러리 갱신
@@ -50,7 +50,8 @@ summary, site_type, target_audience, tags[]
 information_architecture.hierarchy[]   { id, name, level, parent_id, purpose, landmark_ids[] }
 information_architecture.navigation    { primary[], secondary[], utility[], footer[] }
 information_architecture.content_priority[]
-wireframe.blocks[]                     { id, label, type, x, y, w, h (페이지 기준 %), section_id, description }
+wireframe.blocks[]                     { id, label, type, x, y, w, h (스크린샷 기준 %), section_id, landmark_ids[], description }
+                                       → 정규화 후 source: 'dom'(랜드마크 실측으로 스냅) | 'estimate'(모델 추정) 가 붙음
 ux_patterns[]                          { name, category, description, location, evaluation, section_id }
 insights                               { strengths[], improvements[], takeaways[] }
 ```

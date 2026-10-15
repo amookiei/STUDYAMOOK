@@ -8,6 +8,7 @@ import Analysis from './components/Analysis';
 import Comments, { GENERAL_SECTION } from './components/Comments';
 import SettingsModal from './components/SettingsModal';
 import Gate from './components/Gate';
+import { prepareManualScreenshot, buildManualCapture } from './lib/manualCapture';
 
 const TABS = [
   { id: 'screenshot', label: '스크린샷' },
@@ -34,6 +35,7 @@ export default function App() {
   const [job, setJob] = useState(null); // { stage, message }
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
+  const fileInputRef = useRef(null);
 
   const store = useMemo(() => (settings ? createStore(settings) : null), [settings]);
   // 데스크톱: 설정의 키 또는 환경 변수. 웹: 서버(Vercel)에 ANTHROPIC_API_KEY 가 있는지.
@@ -113,6 +115,33 @@ export default function App() {
     }
   }, [store, selected, refreshLibrary, showToast]);
 
+  // 캡처 객체 → Claude 분석 → 저장 → 화면 표시 (자동 캡처와 직접 업로드가 공유)
+  const analyzeAndSave = useCallback(async (capture, id) => {
+      setJob({ stage: 'analyze', message: 'Claude 분석 요청 중…' });
+      const { analysis, meta } = await bridge.analyzeReference({ capture, model: settings?.anthropicModel });
+
+      setJob({ stage: 'save', message: store.kind === 'supabase' ? 'Supabase 에 저장 중…' : '로컬에 저장 중…' });
+      let saved;
+      try {
+        saved = await store.saveReference({ id, capture, analysis, meta });
+      } catch (err) {
+        // 저장이 실패해도 결과는 화면에 보여 준다.
+        showToast(`저장 실패: ${err.message}`, 'error');
+        saved = {
+          id, url: capture.url, title: capture.title, analysis, landmarks: capture.landmarks,
+          screenshot_url: capture.screenshot.url || `data:image/png;base64,${capture.screenshot.base64}`,
+          screenshot_width: capture.screenshot.width, screenshot_height: capture.screenshot.height,
+          model: meta?.model, created_at: new Date().toISOString(), unsaved: true,
+        };
+      }
+      setSelected(saved);
+      setNotes([]);
+      setSelectedSectionId(GENERAL_SECTION.id);
+      setTab('analysis');
+      await refreshLibrary();
+      if (!saved.unsaved) showToast('분석을 완료하고 저장했습니다.');
+  }, [store, settings, refreshLibrary, showToast]);
+
   // ---- 캡처 → 분석 → 저장 ----
   const runAnalysis = useCallback(async () => {
     if (job) return;
@@ -136,37 +165,47 @@ export default function App() {
     setJob({ stage: 'capture', message: '캡처 준비 중…' });
     try {
       const capture = await bridge.capturePage(target);
-      setJob({ stage: 'analyze', message: 'Claude 분석 요청 중…' });
-      const { analysis, meta } = await bridge.analyzeReference({ capture, model: settings?.anthropicModel });
+      await analyzeAndSave(capture, newId());
+    } catch (err) {
+      const msg = err.message || String(err);
+      const blocked = /불러오지 못했|타임아웃|끝나지 않았|차단|403|blocked/i.test(msg) && !/스크린샷 업로드/.test(msg);
+      showToast(blocked ? `${msg} 브라우저에서 전체 페이지 스크린샷을 찍어 "스크린샷 업로드"로 분석할 수도 있습니다.` : msg, 'error');
+      if (err.code === 'invalid_code') { bridge.clearStudioCode(); setGate('locked'); }
+    } finally {
+      setJob(null);
+    }
+  }, [job, url, hasApiKey, webReady, store, settings, analyzeAndSave, showToast]);
 
-      setJob({ stage: 'save', message: store.kind === 'supabase' ? 'Supabase 에 저장 중…' : '로컬에 저장 중…' });
+  // 사용자가 직접 올린 전체 페이지 스크린샷으로 분석 (봇 차단 페이지용)
+  const analyzeUploaded = useCallback(async (file) => {
+    if (job || !file) return;
+    if (!bridge.isElectron) {
+      if (!webReady) { showToast('서버에 ANTHROPIC_API_KEY 환경 변수가 아직 설정되지 않았습니다.', 'error'); return; }
+      if (store.kind !== 'supabase') { showToast('웹에서 분석하려면 설정에서 Supabase 를 먼저 연결해 주세요.', 'error'); setSettingsOpen(true); return; }
+    } else if (!hasApiKey) {
+      showToast('Anthropic API 키가 없습니다. 설정에서 키를 입력해 주세요.', 'error'); setSettingsOpen(true); return;
+    }
+    setJob({ stage: 'capture', message: '올린 스크린샷을 준비하는 중…' });
+    try {
+      const image = await prepareManualScreenshot(file);
       const id = newId();
-      let saved;
-      try {
-        saved = await store.saveReference({ id, capture, analysis, meta });
-      } catch (err) {
-        // 저장이 실패해도 결과는 화면에 보여 준다.
-        showToast(`저장 실패: ${err.message}`, 'error');
-        saved = {
-          id, url: capture.url, title: capture.title, analysis, landmarks: capture.landmarks,
-          screenshot_url: capture.screenshot.url || `data:image/png;base64,${capture.screenshot.base64}`,
-          screenshot_width: capture.screenshot.width, screenshot_height: capture.screenshot.height,
-          model: meta?.model, created_at: new Date().toISOString(), unsaved: true,
-        };
+      let screenshot;
+      if (bridge.isElectron) {
+        screenshot = { base64: image.base64 };
+      } else {
+        setJob({ stage: 'capture', message: '스크린샷을 Supabase 에 올리는 중…' });
+        screenshot = await store.uploadScreenshotBlob(id, image.blob);
       }
-      setSelected(saved);
-      setNotes([]);
-      setSelectedSectionId(GENERAL_SECTION.id);
-      setTab('analysis');
-      await refreshLibrary();
-      if (!saved.unsaved) showToast('분석을 완료하고 저장했습니다.');
+      const capture = buildManualCapture({ url: url.trim(), file, image, screenshot });
+      if (image.scaled) showToast(`이미지가 커서 ${image.width}×${image.height}px 로 축소했습니다.`);
+      await analyzeAndSave(capture, id);
     } catch (err) {
       showToast(err.message || String(err), 'error');
       if (err.code === 'invalid_code') { bridge.clearStudioCode(); setGate('locked'); }
     } finally {
       setJob(null);
     }
-  }, [job, url, hasApiKey, webReady, store, refreshLibrary, showToast]);
+  }, [job, url, hasApiKey, webReady, store, analyzeAndSave, showToast]);
 
   const cancelJob = useCallback(async () => {
     await bridge.cancelAnalysis();
@@ -258,7 +297,25 @@ export default function App() {
           {job ? (
             <button type="button" className="btn btn--ghost" onClick={cancelJob}>취소</button>
           ) : (
-            <button type="submit" className="btn btn--primary" disabled={!settings}>분석 시작</button>
+            <>
+              <button type="submit" className="btn btn--primary" disabled={!settings}>분석 시작</button>
+              <button
+                type="button"
+                className="btn"
+                disabled={!settings}
+                title="봇 차단 등으로 캡처가 안 되는 페이지는 브라우저에서 찍은 전체 페이지 스크린샷을 올려 분석할 수 있습니다. URL 은 참고용으로 함께 저장됩니다."
+                onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              >
+                스크린샷 업로드
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                style={{ display: 'none' }}
+                onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) analyzeUploaded(f); }}
+              />
+            </>
           )}
         </form>
         <button type="button" className="btn btn--ghost" onClick={() => setSettingsOpen(true)} title="설정">⚙ 설정</button>
@@ -329,7 +386,7 @@ export default function App() {
           ) : (
             <div className="workspace__empty">
               <h1>레퍼런스를 분석해 보세요</h1>
-              <p>위 입력창에 URL 을 넣고 <strong>분석 시작</strong>을 누르면 페이지를 캡처하고 Claude 가 정보구조·와이어프레임·UX 패턴을 정리합니다.</p>
+              <p>위 입력창에 URL 을 넣고 <strong>분석 시작</strong>을 누르면 페이지를 캡처하고 Claude 가 정보구조·와이어프레임·UX 패턴을 정리합니다. 봇 차단 등으로 캡처가 안 되는 페이지는 브라우저에서 전체 페이지 스크린샷을 찍어 <strong>스크린샷 업로드</strong>로 분석하세요.</p>
               {bridge.isElectron ? (
                 <ol>
                   <li>설정(⚙)에서 Anthropic API 키를 입력합니다.</li>

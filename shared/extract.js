@@ -193,7 +193,26 @@ const RESTORE_FIXED_SCRIPT = String.raw`
 // 캡처 중 스크롤바가 찍히지 않도록 숨긴다. (레이아웃 폭에도 영향을 주므로 랜드마크 추출 전에 넣는다)
 const HIDE_SCROLLBAR_CSS = 'html { scrollbar-width: none !important; } html::-webkit-scrollbar, body::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }';
 
+// 랜드마크 박스의 퍼센트 좌표를 "실제로 캡처된 영역" 기준으로 다시 계산한다.
+// 긴 페이지를 maxHeight 로 잘라 찍으면 문서 전체 높이 기준 퍼센트와 스크린샷이 어긋나기 때문.
+function rescaleLandmarksToCapture(landmarks, capturedWidth, capturedHeight) {
+  if (!landmarks || !Array.isArray(landmarks.landmarks)) return landmarks;
+  const w = capturedWidth || landmarks.page?.width || 1;
+  const h = capturedHeight || landmarks.page?.height || 1;
+  const pct = (v, total) => +((100 * v) / total).toFixed(2);
+  for (const lm of landmarks.landmarks) {
+    const b = lm.box; if (!b) continue;
+    b.xPct = pct(b.x, w); b.wPct = pct(b.width, w);
+    b.yPct = pct(b.y, h); b.hPct = pct(b.height, h);
+    b.offscreen = b.y >= h; // 캡처 범위 밖
+    if (!b.offscreen && b.y + b.height > h) b.hPct = pct(h - b.y, h); // 아래가 잘린 경우
+  }
+  landmarks.landmarks = landmarks.landmarks.filter((lm) => !lm.box || !lm.box.offscreen);
+  return landmarks;
+}
+
 module.exports = {
+  rescaleLandmarksToCapture,
   USER_AGENT,
   EXTRACT_SCRIPT,
   HIDE_FIXED_SCRIPT,

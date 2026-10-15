@@ -76,16 +76,17 @@ const ANALYSIS_SCHEMA = {
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['id', 'label', 'type', 'x', 'y', 'w', 'h', 'section_id', 'description'],
+            required: ['id', 'label', 'type', 'x', 'y', 'w', 'h', 'section_id', 'landmark_ids', 'description'],
             properties: {
               id: { type: 'string', description: '예: wf-1' },
               label: { type: 'string', description: '블록에 표시할 짧은 라벨(한국어)' },
               type: { type: 'string', enum: BLOCK_TYPES },
-              x: { type: 'number', description: '왼쪽 위치, 페이지 너비 기준 %' },
-              y: { type: 'number', description: '위쪽 위치, 페이지 높이 기준 %' },
+              x: { type: 'number', description: '왼쪽 위치, 스크린샷 너비 기준 %' },
+              y: { type: 'number', description: '위쪽 위치, 스크린샷 높이 기준 %' },
               w: { type: 'number', description: '너비 %' },
               h: { type: 'number', description: '높이 %' },
               section_id: { type: 'string', description: 'information_architecture.hierarchy 의 id' },
+              landmark_ids: { type: 'array', items: { type: 'string' }, description: '이 블록이 그대로 대응하는 DOM 랜드마크 id(lm-N). 대응하는 랜드마크가 있으면 반드시 적고 그 box 값을 x/y/w/h 로 복사한다. 없으면 빈 배열' },
               description: { type: 'string', description: '블록 안에 어떤 요소가 있는지(한국어, 1문장)' },
             },
           },
@@ -128,8 +129,9 @@ const SYSTEM_PROMPT = `당신은 시니어 UX 리서처이자 정보 설계자�
 분석 원칙:
 - 모든 설명 텍스트는 한국어로 작성합니다. 메뉴 라벨처럼 페이지에 실제로 쓰인 문구는 원문 그대로 둡니다.
 - 정보구조(hierarchy)는 실제 페이지 순서와 포함 관계를 따릅니다. DOM 랜드마크 id(lm-N)를 landmark_ids 로 연결합니다.
-- 와이어프레임 블록 좌표(x, y, w, h)는 전체 페이지 기준 퍼센트(0~100)입니다. 스크린샷 조각마다 "이 조각이 페이지의 몇 %~몇 % 구간인지"가 적혀 있으니 그 정보와 DOM 랜드마크의 yPct/hPct 를 활용해 위치를 추정하세요. 블록은 서로 겹치지 않게, 위에서 아래로 정렬하고 8~20개 정도로 만듭니다.
+- 와이어프레임 블록 좌표(x, y, w, h)는 스크린샷 전체 기준 퍼센트(0~100)입니다. DOM 랜드마크 데이터에는 실제로 측정된 box(xPct, yPct, wPct, hPct)가 들어 있습니다. 블록이 랜드마크(header, nav, section 등)와 같은 영역이면 landmark_ids 에 그 id 를 적고 box 값을 그대로 x/y/w/h 로 복사하세요. 추정은 랜드마크가 없는 영역에만 쓰며, 그때는 스크린샷 조각마다 적힌 "페이지의 몇 %~몇 % 구간" 정보로 위치를 계산합니다. 블록은 서로 겹치지 않게, 위에서 아래로 정렬하고 8~20개 정도로 만듭니다.
 - 각 와이어프레임 블록의 section_id 는 반드시 hierarchy 에 있는 id 를 사용합니다.
+- DOM 데이터가 없는 경우(사용자가 직접 올린 스크린샷)에는 landmark_ids 를 빈 배열로 두고 스크린샷만 보고 분석합니다.
 - UX 패턴은 구체적으로: 무엇을, 어디에서, 왜 그렇게 했는지 적습니다. 좋은 점(strength)과 개선 여지(improvement)를 균형 있게 다룹니다.
 - 추측이 필요한 부분은 단정하지 말고 "~로 보입니다"처럼 표현합니다.`;
 
@@ -190,7 +192,7 @@ function tileScreenshot(screenshot) {
 
 // 모델에 보낼 랜드마크 데이터는 토큰을 아끼기 위해 필요한 필드만 남긴다.
 function compactLandmarks(landmarks) {
-  const list = (landmarks.landmarks || []).map((lm) => ({
+  const list = (Array.isArray(landmarks.landmarks) ? landmarks.landmarks : []).map((lm) => ({
     id: lm.id,
     tag: lm.tag,
     role: lm.role,
@@ -222,17 +224,18 @@ function buildUserContent(capture, tiles) {
     content.push({ type: 'image', source: { type: 'base64', media_type: tile.mediaType, data: tile.base64 } });
   }
   const compact = compactLandmarks(capture.landmarks || {});
+  const hasDom = compact.landmarks.length > 0;
   content.push({
     type: 'text',
     text: [
-      `분석 대상 URL: ${capture.url}`,
+      `분석 대상 URL: ${capture.url || '(알 수 없음)'}`,
       `페이지 제목: ${capture.title || '(없음)'}`,
       `캡처 크기: ${capture.screenshot.width} x ${capture.screenshot.height}px${capture.landmarks?.page?.truncated ? ' (너무 길어서 아래쪽은 잘림)' : ''}`,
       '',
-      '아래는 DOM 에서 추출한 랜드마크 구조 데이터(JSON)입니다. box 의 yPct/hPct 는 전체 페이지 기준 퍼센트입니다.',
-      '```json',
-      JSON.stringify(compact),
-      '```',
+      hasDom
+        ? '아래는 DOM 에서 추출한 랜드마크 구조 데이터(JSON)입니다. box 의 xPct/yPct/wPct/hPct 는 스크린샷 전체 기준으로 실측한 퍼센트이므로 와이어프레임 블록 좌표에 그대로 사용하세요.'
+        : '이 스크린샷은 사용자가 직접 올린 이미지라 DOM 구조 데이터가 없습니다. 스크린샷만 보고 분석하고, 와이어프레임 블록의 landmark_ids 는 빈 배열로 두세요.',
+      ...(hasDom ? ['```json', JSON.stringify(compact), '```'] : []),
       '',
       '위 스크린샷과 구조 데이터를 바탕으로 정보구조, 와이어프레임, UX 패턴을 분석해 주세요.',
     ].join('\n'),
@@ -247,7 +250,26 @@ const clampPct = (v) => Math.min(100, Math.max(0, Number.isFinite(+v) ? +v : 0))
 const asArray = (v) => (Array.isArray(v) ? v : []);
 const asString = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
-function normalizeAnalysis(raw) {
+// 블록이 참조한 랜드마크들의 실측 박스를 합쳐 정확한 좌표로 맞춘다.
+function snapToLandmarks(block, landmarkMap) {
+  const ids = asArray(block.landmark_ids).map(asString).filter((id) => landmarkMap.has(id));
+  if (!ids.length) return null;
+  let x0 = 100; let y0 = 100; let x1 = 0; let y1 = 0;
+  for (const id of ids) {
+    const b = landmarkMap.get(id);
+    x0 = Math.min(x0, b.xPct); y0 = Math.min(y0, b.yPct);
+    x1 = Math.max(x1, b.xPct + b.wPct); y1 = Math.max(y1, b.yPct + b.hPct);
+  }
+  if (x1 <= x0 || y1 <= y0) return null;
+  return { x: clampPct(x0), y: clampPct(y0), w: clampPct(x1 - x0), h: clampPct(y1 - y0), ids };
+}
+
+function normalizeAnalysis(raw, landmarks) {
+  const landmarkMap = new Map(
+    asArray(landmarks?.landmarks)
+      .filter((lm) => lm && lm.id && lm.box && Number.isFinite(+lm.box.yPct))
+      .map((lm) => [lm.id, { xPct: +lm.box.xPct || 0, yPct: +lm.box.yPct || 0, wPct: +lm.box.wPct || 0, hPct: +lm.box.hPct || 0 }]),
+  );
   const ia = raw.information_architecture || {};
   const hierarchy = asArray(ia.hierarchy).map((s, i) => ({
     id: asString(s.id) || `sec-${i + 1}`,
@@ -260,15 +282,21 @@ function normalizeAnalysis(raw) {
   const sectionIds = new Set(hierarchy.map((s) => s.id));
 
   const blocks = asArray(raw.wireframe?.blocks).filter((b) => clampPct(b.x) < 100 && clampPct(b.y) < 100).map((b, i) => {
-    const x = clampPct(b.x); const y = clampPct(b.y);
+    const snapped = snapToLandmarks(b, landmarkMap);
+    const x = snapped ? snapped.x : clampPct(b.x);
+    const y = snapped ? snapped.y : clampPct(b.y);
+    const w = snapped ? snapped.w : clampPct(b.w);
+    const h = snapped ? snapped.h : clampPct(b.h);
     return {
       id: asString(b.id) || `wf-${i + 1}`,
       label: asString(b.label) || `블록 ${i + 1}`,
       type: BLOCK_TYPES.includes(b.type) ? b.type : 'other',
       x, y,
-      w: Math.max(1, Math.min(100 - x, clampPct(b.w))),
-      h: Math.max(0.5, Math.min(100 - y, clampPct(b.h))),
+      w: Math.max(1, Math.min(100 - x, w)),
+      h: Math.max(0.5, Math.min(100 - y, h)),
       section_id: sectionIds.has(b.section_id) ? b.section_id : (hierarchy[0]?.id || ''),
+      landmark_ids: snapped ? snapped.ids : [],
+      source: snapped ? 'dom' : 'estimate', // dom: DOM 실측 좌표, estimate: 모델 추정
       description: asString(b.description),
     };
   }).sort((a, b) => a.y - b.y || a.x - b.x);
@@ -387,7 +415,7 @@ async function analyzeReference(input, deps = {}) {
   }
 
   const raw = extractJson(message);
-  const analysis = normalizeAnalysis(raw);
+  const analysis = normalizeAnalysis(raw, input.capture.landmarks);
   return {
     analysis,
     meta: {
