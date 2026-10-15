@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import bridge from '../lib/bridge';
 import { testSupabase } from '../lib/supabase';
+import { PRESET, hasPresetSupabase } from '../lib/config';
 
 const FALLBACK_MODELS = [
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 (기본, 가장 정확)' },
@@ -121,17 +122,22 @@ export default function SettingsModal({ settings, modelOptions, appInfo, onSave,
 
         <fieldset className="fieldset">
           <legend>Supabase (저장소)</legend>
+          {hasPresetSupabase && (
+            <p className="muted small">환경 변수로 미리 설정된 프로젝트(<code>{PRESET.supabaseUrl}</code>)를 사용 중입니다. 다른 프로젝트를 쓰려면 아래에 입력하세요.</p>
+          )}
           <label className="field">
             <span className="field__label">프로젝트 URL</span>
-            <input className="input" placeholder="https://xxxx.supabase.co" value={form.supabaseUrl || ''} onChange={set('supabaseUrl')} />
+            <input className="input" placeholder={hasPresetSupabase ? '비워 두면 환경 변수 값 사용' : 'https://xxxx.supabase.co'} value={form.supabaseUrl || ''} onChange={set('supabaseUrl')} />
           </label>
           <label className="field">
             <span className="field__label">anon key</span>
-            <input className="input" type="password" placeholder="eyJ…" value={form.supabaseAnonKey || ''} onChange={set('supabaseAnonKey')} autoComplete="off" />
+            <input className="input" type="password" placeholder={hasPresetSupabase ? '비워 두면 환경 변수 값 사용' : 'eyJ…'} value={form.supabaseAnonKey || ''} onChange={set('supabaseAnonKey')} autoComplete="off" />
           </label>
-          <p className="muted small">비워 두면 이 PC 에만 로컬 저장됩니다. 처음 연결할 때는 <code>supabase/schema.sql</code> 을 Supabase SQL Editor 에서 실행해 테이블과 버킷을 만들어 주세요.</p>
+          {!hasPresetSupabase && (
+            <p className="muted small">비워 두면 이 PC 에만 로컬 저장됩니다. 처음 연결할 때는 <code>supabase/schema.sql</code> 을 Supabase SQL Editor 에서 실행해 테이블과 버킷을 만들어 주세요.</p>
+          )}
           <div className="field__row">
-            <button type="button" className="btn btn--sm" onClick={testSupa} disabled={!form.supabaseUrl || !form.supabaseAnonKey}>연결 테스트</button>
+            <button type="button" className="btn btn--sm" onClick={testSupa} disabled={!hasPresetSupabase && (!form.supabaseUrl || !form.supabaseAnonKey)}>연결 테스트</button>
             <Status value={status.supabase} />
           </div>
         </fieldset>
