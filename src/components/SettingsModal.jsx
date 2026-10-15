@@ -2,6 +2,13 @@ import React, { useEffect, useState } from 'react';
 import bridge from '../lib/bridge';
 import { testSupabase } from '../lib/supabase';
 import { PRESET, hasPresetSupabase, normalizeSupabaseUrl } from '../lib/config';
+import schemaSql from '../../supabase/schema.sql?raw';
+
+// Supabase SQL Editor 링크 (프로젝트 ref 를 URL 에서 꺼낸다)
+function sqlEditorUrl(supabaseUrl) {
+  const m = /^https:\/\/([a-z0-9-]+)\.supabase\.(co|in)$/i.exec(normalizeSupabaseUrl(supabaseUrl));
+  return m ? `https://supabase.com/dashboard/project/${m[1]}/sql/new` : 'https://supabase.com/dashboard';
+}
 
 const FALLBACK_MODELS = [
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 (기본, 가장 정확)' },
@@ -14,6 +21,8 @@ export default function SettingsModal({ settings, modelOptions, appInfo, onSave,
   const [status, setStatus] = useState({ anthropic: null, supabase: null });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [schemaOpen, setSchemaOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const models = modelOptions && modelOptions.length ? modelOptions : FALLBACK_MODELS;
 
   useEffect(() => { setForm({ ...settings }); }, [settings]);
@@ -43,8 +52,21 @@ export default function SettingsModal({ settings, modelOptions, appInfo, onSave,
       setStatus((s) => ({ ...s, supabase: { state: 'ok', message: 'references 테이블과 screenshots 버킷에 접근할 수 있습니다.' } }));
     } catch (err) {
       setStatus((s) => ({ ...s, supabase: { state: 'error', message: err.message } }));
+      // 테이블/버킷이 없으면 스키마 안내를 자동으로 펼친다
+      if (/schema cache|does not exist|찾을 수 없|버킷/i.test(err.message || '')) setSchemaOpen(true);
     }
   };
+
+  const copySchema = async () => {
+    try {
+      await navigator.clipboard.writeText(schemaSql);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt('아래 SQL 을 복사하세요', schemaSql);
+    }
+  };
+  const effectiveSupabaseUrl = form.supabaseUrl || PRESET.supabaseUrl;
 
   const save = async () => {
     setSaving(true); setError('');
@@ -142,6 +164,24 @@ export default function SettingsModal({ settings, modelOptions, appInfo, onSave,
           <div className="field__row">
             <button type="button" className="btn btn--sm" onClick={testSupa} disabled={!hasPresetSupabase && (!form.supabaseUrl || !form.supabaseAnonKey)}>연결 테스트</button>
             <Status value={status.supabase} />
+          </div>
+          <div className="schema">
+            <button type="button" className="link" onClick={() => setSchemaOpen((v) => !v)}>
+              {schemaOpen ? '▾' : '▸'} 처음 연결할 때: 테이블·버킷 만들기 (schema.sql)
+            </button>
+            {schemaOpen && (
+              <div className="schema__body">
+                <ol className="small">
+                  <li>아래 <strong>SQL 복사</strong> → <strong>SQL Editor 열기</strong> (해당 프로젝트의 SQL Editor 가 열립니다)</li>
+                  <li>New query 에 붙여넣고 <strong>Run</strong>. "Success" 가 뜨면 다시 <strong>연결 테스트</strong></li>
+                </ol>
+                <div className="field__row">
+                  <button type="button" className="btn btn--sm" onClick={copySchema}>{copied ? '복사됨 ✓' : 'SQL 복사'}</button>
+                  <button type="button" className="btn btn--sm" onClick={() => bridge.openExternal(sqlEditorUrl(effectiveSupabaseUrl))} disabled={!effectiveSupabaseUrl}>SQL Editor 열기</button>
+                </div>
+                <textarea className="input schema__sql" readOnly rows={6} value={schemaSql} onFocus={(e) => e.target.select()} />
+              </div>
+            )}
           </div>
         </fieldset>
 

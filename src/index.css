@@ -237,3 +237,9 @@ textarea.input { resize: vertical; }
 .gate__input { font-size: 16px; letter-spacing: 0.1em; }
 .gate__submit { margin-top: 4px; }
 .gate__error { margin: 0; }
+
+/* ---------- 스키마 안내 (설정 모달) ---------- */
+.schema { margin-top: 4px; }
+.schema__body { margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+.schema__body ol { margin: 0; padding-left: 18px; }
+.schema__sql { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11px; white-space: pre; resize: vertical; }
