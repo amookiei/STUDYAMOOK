@@ -22,14 +22,17 @@
     "@anthropic-ai/sdk": "^0.133.0"
   },
   "devDependencies": {
+    "@sparticuz/chromium": "^153.0.0",
     "@supabase/supabase-js": "^2.117.3",
     "@vitejs/plugin-react": "^6.1.2",
     "concurrently": "^10.0.6",
     "cross-env": "^10.1.0",
     "electron": "^44.7.2",
     "electron-builder": "^26.15.3",
+    "playwright-core": "^1.64.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "sharp": "^0.35.5",
     "vite": "^8.3.4",
     "wait-on": "^9.5.1"
   },
@@ -44,6 +47,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "shared/**/*",
       "package.json",
       "!**/*.map"
     ],

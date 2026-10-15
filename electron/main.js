@@ -120,6 +120,7 @@ function registerIpc() {
     userData: app.getPath('userData'),
     defaultModel: analyzer.DEFAULT_MODEL,
     modelOptions: analyzer.MODEL_OPTIONS,
+    hasEnvCredentials: analyzer.hasDefaultCredentials(),
   }));
 }
 
