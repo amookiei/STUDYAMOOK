@@ -16,6 +16,8 @@ export function createStore(settings) {
       updateNote: (id, body) => supa.updateNote(client, id, body),
       deleteNote: (id) => supa.deleteNote(client, id),
       uploadScreenshotBlob: (id, blob) => supa.uploadScreenshotBlob(client, id, blob),
+      getStudy: (refId) => supa.getStudy(client, refId),
+      saveStudy: (refId, study) => supa.saveStudy(client, refId, study),
     };
   }
   return {
@@ -28,6 +30,8 @@ export function createStore(settings) {
     addNote: local.addNote,
     updateNote: local.updateNote,
     deleteNote: local.deleteNote,
+    getStudy: local.getStudy,
+    saveStudy: local.saveStudy,
   };
 }
 

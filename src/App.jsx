@@ -8,13 +8,22 @@ import Analysis from './components/Analysis';
 import Comments, { GENERAL_SECTION } from './components/Comments';
 import SettingsModal from './components/SettingsModal';
 import Gate from './components/Gate';
+import Studio from './components/Studio';
+import IaBuilder from './components/IaBuilder';
+import Compare from './components/Compare';
 import { prepareManualScreenshot, buildManualCapture } from './lib/manualCapture';
+import { normalizeStudy, orderedNodes } from './lib/study';
 
+// ai: true 인 탭은 학습 기록(study.revealed)이 공개되기 전까지 가려진다 — 먼저 직접 그린 뒤 AI 와 비교하는 흐름.
 const TABS = [
   { id: 'screenshot', label: '스크린샷' },
-  { id: 'wireframe', label: '와이어프레임' },
-  { id: 'analysis', label: '분석' },
+  { id: 'draw', label: '내 와이어프레임' },
+  { id: 'ia', label: '내 IA' },
+  { id: 'wireframe', label: 'AI 와이어프레임', ai: true },
+  { id: 'analysis', label: 'AI 분석', ai: true },
+  { id: 'compare', label: '비교·기록', ai: true },
 ];
+const STUDY_STATE_LABEL = { dirty: '변경됨', saving: '저장 중…', saved: '학습 기록 저장됨', error: '저장 실패', local: '저장 안 됨 (레퍼런스 미저장)' };
 
 export default function App() {
   const [settings, setSettings] = useState(null);
@@ -29,6 +38,10 @@ export default function App() {
   const [notes, setNotes] = useState([]);
   const [notesBusy, setNotesBusy] = useState(false);
   const [selectedSectionId, setSelectedSectionId] = useState(GENERAL_SECTION.id);
+
+  const [study, setStudy] = useState(null);
+  const [studyState, setStudyState] = useState('idle'); // idle | dirty | saving | saved | error | local
+  const studyRef = useRef({ id: null, data: null, dirty: false, timer: null, errorShown: false });
 
   const [url, setUrl] = useState('');
   const [tab, setTab] = useState('screenshot');
@@ -74,6 +87,53 @@ export default function App() {
     return bridge.onProgress((p) => setJob((j) => (j ? { ...j, ...p } : j)));
   }, [showToast]);
 
+  // ---- 학습 기록(내 와이어프레임 / IA / 비교 글) 자동 저장 ----
+  const persistStudy = useCallback(async () => {
+    const cur = studyRef.current;
+    clearTimeout(cur.timer);
+    if (!cur.dirty || !cur.id || !store) return;
+    cur.dirty = false;
+    setStudyState('saving');
+    try {
+      await store.saveStudy(cur.id, cur.data);
+      setStudyState(cur.dirty ? 'dirty' : 'saved');
+    } catch (err) {
+      cur.dirty = true;
+      setStudyState('error');
+      if (!cur.errorShown) { cur.errorShown = true; showToast(`학습 기록 저장 실패: ${err.message}`, 'error'); }
+    }
+  }, [store, showToast]);
+
+  const updateStudy = useCallback((patch) => {
+    const cur = studyRef.current;
+    const prev = cur.data || normalizeStudy(null);
+    const next = typeof patch === 'function' ? patch(prev) : { ...prev, ...patch };
+    cur.data = next;
+    setStudy(next);
+    if (!cur.id) { setStudyState('local'); return; }
+    cur.dirty = true;
+    setStudyState('dirty');
+    clearTimeout(cur.timer);
+    cur.timer = setTimeout(persistStudy, 900);
+  }, [persistStudy]);
+
+  const openStudy = useCallback(async (ref) => {
+    await persistStudy(); // 이전 레퍼런스의 변경 사항을 먼저 저장
+    const cur = studyRef.current;
+    cur.id = ref && !ref.unsaved ? ref.id : null;
+    cur.dirty = false;
+    cur.errorShown = false;
+    let data = normalizeStudy(null);
+    if (cur.id && store) {
+      try { data = normalizeStudy(await store.getStudy(cur.id)); } catch (err) { showToast(err.message, 'error'); }
+    }
+    cur.data = data;
+    setStudy(data);
+    setStudyState(cur.id ? 'idle' : 'local');
+  }, [store, persistStudy, showToast]);
+
+  useEffect(() => () => { clearTimeout(studyRef.current.timer); }, []);
+
   const refreshLibrary = useCallback(async () => {
     if (!store) return;
     setLibraryLoading(true);
@@ -97,17 +157,18 @@ export default function App() {
       setSelectedSectionId(GENERAL_SECTION.id);
       setNotes(await store.listNotes(full.id));
       setUrl(full.url || '');
+      await openStudy(full);
     } catch (err) {
       showToast(err.message, 'error');
     }
-  }, [store, showToast]);
+  }, [store, openStudy, showToast]);
 
   const deleteReference = useCallback(async (ref) => {
     if (!store) return;
     if (!window.confirm(`"${ref.title || ref.url}" 레퍼런스와 코멘트를 삭제할까요?`)) return;
     try {
       await store.deleteReference(ref);
-      if (selected?.id === ref.id) { setSelected(null); setNotes([]); }
+      if (selected?.id === ref.id) { setSelected(null); setNotes([]); setStudy(null); studyRef.current = { ...studyRef.current, id: null, data: null, dirty: false }; }
       await refreshLibrary();
       showToast('삭제했습니다.');
     } catch (err) {
@@ -137,10 +198,11 @@ export default function App() {
       setSelected(saved);
       setNotes([]);
       setSelectedSectionId(GENERAL_SECTION.id);
-      setTab('analysis');
+      await openStudy(saved);
+      setTab('draw');
       await refreshLibrary();
-      if (!saved.unsaved) showToast('분석을 완료하고 저장했습니다.');
-  }, [store, settings, refreshLibrary, showToast]);
+      if (!saved.unsaved) showToast('분석을 완료하고 저장했습니다. AI 결과는 가려 두었으니 먼저 직접 그려 보세요.');
+  }, [store, settings, refreshLibrary, openStudy, showToast]);
 
   // ---- 캡처 → 분석 → 저장 ----
   const runAnalysis = useCallback(async () => {
@@ -249,6 +311,14 @@ export default function App() {
 
   // ---- 렌더 ----
   const analysis = selected?.analysis || null;
+  const revealed = Boolean(study?.revealed);
+  // 코멘트 패널 섹션: 내 IA 노드 + (AI 공개 후) AI 섹션
+  const commentSections = useMemo(() => {
+    const mine = orderedNodes(study?.ia?.nodes || []).map(({ node, depth }) => ({ id: `my:${node.id}`, name: node.name || '(이름 없음)', level: depth, group: '내 IA' }));
+    const ai = revealed ? (analysis?.information_architecture?.hierarchy || []).map((s) => ({ id: s.id, name: s.name, level: s.level, group: 'AI 분석' })) : [];
+    return [GENERAL_SECTION, ...mine, ...ai];
+  }, [study, analysis, revealed]);
+  const studyProgress = study ? { blocks: study.drawing.shapes.filter((s) => s.kind === 'block').length, nodes: study.ia.nodes.filter((n) => n.kind !== 'component').length } : { blocks: 0, nodes: 0 };
   let banner = null;
   if (settings) {
     if (!bridge.isElectron) {
@@ -358,17 +428,65 @@ export default function App() {
                   <h1 title={selected.title}>{selected.title || selected.url}</h1>
                   <button type="button" className="link" onClick={() => bridge.openExternal(selected.url)} title="브라우저에서 열기">{selected.url}</button>
                 </div>
-                <nav className="tabs">
-                  {TABS.map((t) => (
-                    <button key={t.id} type="button" className={`tab${tab === t.id ? ' tab--active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
-                  ))}
-                </nav>
+                <div className="workspace__tabs">
+                  {studyState !== 'idle' && STUDY_STATE_LABEL[studyState] && (
+                    <span className={`save-state save-state--${studyState}`}>{STUDY_STATE_LABEL[studyState]}</span>
+                  )}
+                  <nav className="tabs">
+                    {TABS.map((t) => (
+                      <button key={t.id} type="button" className={`tab${tab === t.id ? ' tab--active' : ''}${t.ai && !revealed ? ' tab--locked' : ''}`} onClick={() => setTab(t.id)} title={t.ai && !revealed ? 'AI 결과는 직접 그린 뒤 공개할 수 있습니다' : undefined}>
+                        {t.ai && !revealed ? '🔒 ' : ''}{t.label}
+                      </button>
+                    ))}
+                  </nav>
+                </div>
               </div>
               <div className="workspace__body">
                 {tab === 'screenshot' && (
                   <Screenshot src={selected.screenshot_url} width={selected.screenshot_width} height={selected.screenshot_height} url={selected.url} />
                 )}
-                {tab === 'wireframe' && (
+                {tab === 'draw' && study && (
+                  <Studio
+                    screenshotUrl={selected.screenshot_url}
+                    pageWidth={selected.screenshot_width}
+                    pageHeight={selected.screenshot_height}
+                    drawing={study.drawing}
+                    iaNodes={study.ia.nodes}
+                    title={selected.title || selected.url}
+                    onChange={(drawing) => updateStudy({ drawing })}
+                    onToast={showToast}
+                  />
+                )}
+                {tab === 'ia' && study && (
+                  <div className="workspace__scroll">
+                    <IaBuilder
+                      nodes={study.ia.nodes}
+                      onChange={(nodes) => updateStudy({ ia: { nodes } })}
+                      plan={study.plan}
+                      onPlanChange={(patch) => updateStudy((prev) => ({ ...prev, plan: { ...prev.plan, ...patch } }))}
+                      blocks={study.drawing.shapes}
+                    />
+                  </div>
+                )}
+                {TABS.find((t) => t.id === tab)?.ai && !revealed && (
+                  <div className="cover">
+                    <div className="cover__card">
+                      <h2>AI 결과는 아직 가려져 있습니다</h2>
+                      <p>먼저 <strong>내 와이어프레임</strong>에서 블록을 그리고 <strong>내 IA</strong>에서 정보를 묶어 보세요. 직접 분석한 뒤에 AI 결과를 열면, 무엇을 같게 보고 무엇을 다르게 봤는지가 드러납니다.</p>
+                      <p className="muted">지금까지: 블록 {studyProgress.blocks}개 · IA 노드 {studyProgress.nodes}개</p>
+                      <div className="inspector__actions">
+                        <button type="button" className="btn btn--primary" onClick={() => updateStudy({ revealed: true })}>AI 분석 공개하기</button>
+                        <button type="button" className="btn btn--ghost" onClick={() => setTab('draw')}>먼저 그리러 가기</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {tab === 'compare' && revealed && study && (
+                  <div className="workspace__scroll">
+                    <Compare reference={selected} analysis={analysis} study={study} notes={notes} onChange={(patch) => updateStudy(patch)} onToast={showToast} />
+                  </div>
+                )}
+                {tab === 'wireframe' && revealed && (
                   <Wireframe
                     analysis={analysis}
                     screenshotUrl={selected.screenshot_url}
@@ -378,15 +496,16 @@ export default function App() {
                     onSelectSection={selectSection}
                   />
                 )}
-                {tab === 'analysis' && (
+                {tab === 'analysis' && revealed && (
                   <Analysis analysis={analysis} meta={{ model: selected.model }} selectedSectionId={selectedSectionId} onSelectSection={selectSection} />
                 )}
               </div>
             </>
           ) : (
             <div className="workspace__empty">
-              <h1>레퍼런스를 분석해 보세요</h1>
+              <h1>화면을 직접 분석하고, AI 와 비교해 보세요</h1>
               <p>위 입력창에 URL 을 넣고 <strong>분석 시작</strong>을 누르면 페이지를 캡처하고 Claude 가 정보구조·와이어프레임·UX 패턴을 정리합니다. 봇 차단 등으로 캡처가 안 되는 페이지는 브라우저에서 전체 페이지 스크린샷을 찍어 <strong>스크린샷 업로드</strong>로 분석하세요.</p>
+              <p>AI 결과는 처음에 가려져 있습니다. <strong>내 와이어프레임</strong>에서 블록을 그리고(정보/컴포넌트 구분, 실제 문구, 상태 케이스), <strong>내 IA</strong>에서 정보를 묶은 뒤 AI 결과를 열어 <strong>비교·기록</strong> 탭에서 LinkedIn 초안을 만들 수 있습니다.</p>
               {bridge.isElectron ? (
                 <ol>
                   <li>설정(⚙)에서 Anthropic API 키를 입력합니다.</li>
@@ -407,7 +526,7 @@ export default function App() {
 
         <Comments
           reference={selected}
-          analysis={analysis}
+          sections={commentSections}
           notes={notes}
           selectedSectionId={selectedSectionId}
           onSelectSection={selectSection}

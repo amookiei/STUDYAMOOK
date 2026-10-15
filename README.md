@@ -6,9 +6,10 @@
 
 | 왼쪽 | 가운데 | 오른쪽 |
 | --- | --- | --- |
-| 레퍼런스 라이브러리 (검색, 선택, 삭제) | 스크린샷 · 와이어프레임 · 분석 탭 | 섹션별 코멘트 (추가 / 수정 / 삭제) |
+| 레퍼런스 라이브러리 (검색, 선택, 삭제) | 스크린샷 · **내 와이어프레임** · **내 IA** · AI 와이어프레임 · AI 분석 · **비교·기록** 탭 | 섹션별 코멘트 (내 IA 노드 / AI 섹션) |
 
 - 와이어프레임 블록이나 정보구조 항목을 클릭하면 오른쪽 코멘트 패널에서 해당 섹션이 선택됩니다.
+- **학습 모드**: AI 결과는 처음에 가려져 있습니다(🔒). 먼저 **내 와이어프레임**에서 스크린샷 위에 블록·텍스트·펜·핀을 직접 그리고(정보/컴포넌트 구분, 실제 문구, 노출 조건/상태 케이스), **내 IA**에서 문제 정의와 정보 구조(1~3 depth, 컴포넌트는 보관함으로)를 정리한 뒤 "AI 분석 공개"를 누르면 **비교·기록** 탭에서 블록/IA 일치 결과, 원칙 체크리스트, LinkedIn 초안(Markdown)과 비교 이미지(PNG)를 얻을 수 있습니다. 자세한 명세는 `docs/기능명세서-학습모드.md` 참고.
 - 와이어프레임 블록은 DOM 에서 실측한 랜드마크 위치에 맞춰 그려집니다(실선). 랜드마크가 없는 영역은 모델이 추정한 위치(점선)입니다. "스크린샷 위에 겹쳐 보기" 와 투명도 슬라이더로 실제 화면과 비교할 수 있습니다.
 
 ## 시작하기 (데스크톱)
@@ -27,7 +28,7 @@ npm run dev        # Vite 개발 서버(5173) + Electron 창
 1. **Anthropic API 키** (필수) 와 모델 (기본 `claude-opus-5-5`) — https://console.anthropic.com 에서 발급
 2. **Supabase 프로젝트 URL + anon key** (선택). 비워 두면 결과가 이 PC(IndexedDB)에만 저장됩니다. 설치 파일을 빌드할 때 환경 변수로 미리 넣어 두었다면 입력하지 않아도 됩니다.
    - https://supabase.com 에서 새 프로젝트 생성 (무료 플랜으로 충분)
-   - 좌측 **SQL Editor** → `supabase/schema.sql` 전체를 붙여넣고 Run → `references` / `notes` 테이블과 `screenshots` 버킷 생성
+   - 좌측 **SQL Editor** → `supabase/schema.sql` 전체를 붙여넣고 Run → `references` / `notes` / `studies` 테이블과 `screenshots` 버킷 생성 (이미 쓰고 있었다면 `studies` 테이블 추가를 위해 한 번 더 실행하세요. 멱등이라 기존 데이터는 그대로입니다)
    - **Project Settings → API** 에서 `Project URL` 과 `anon public` 키 복사
    - schema.sql 은 개인용으로 anon 키에 모든 권한을 줍니다. 여러 명이 쓰거나 키가 노출될 수 있으면 Supabase Auth 를 붙이고 정책을 바꾸세요.
 
@@ -40,6 +41,7 @@ npm run dev        # Vite 개발 서버(5173) + Electron 창
 3. `electron/analyzer.js` — 스크린샷을 1100px 폭으로 축소해 세로 1500px 타일(최대 8장)로 자르고, 랜드마크 JSON 과 함께 Claude 에 전송. **Structured Outputs(`output_config.format: json_schema`)** 로 `ANALYSIS_SCHEMA` 에 맞는 JSON 을 받고 `normalizeAnalysis()` 로 좌표·enum 을 보정
 4. `src/lib/supabase.js` — `screenshots` 버킷에 PNG 업로드 → `references` 행 insert → 라이브러리 갱신
 5. 오른쪽 패널에서 섹션별 코멘트를 `notes` 테이블에 저장
+6. 내 와이어프레임 · 내 IA · 문제 정의 · 비교 글은 레퍼런스당 한 행으로 `studies` 테이블(`data` jsonb)에 자동 저장(0.9초 디바운스). 구조는 `src/lib/study.js` 의 `normalizeStudy()` 참고
 
 ### 분석 결과 스키마 (요약)
 
@@ -130,9 +132,10 @@ electron/
   analyzer.js    프롬프트, 출력 스키마, Anthropic 호출, 결과 정규화
   settings.js    설정 저장 (safeStorage 암호화)
 src/
-  App.jsx        3컬럼 레이아웃, 분석 파이프라인 상태, 코멘트 CRUD
-  components/    Library · Screenshot · Wireframe · Analysis · Comments · SettingsModal
-  lib/           bridge(IPC 래퍼, 웹 모드에서는 /api 호출) · supabase · localStore(IndexedDB) · store(백엔드 선택)
+  App.jsx        3컬럼 레이아웃, 분석 파이프라인 상태, 코멘트 CRUD, 학습 기록 자동 저장, AI 결과 가리기
+  components/    Library · Screenshot · Studio(내 와이어프레임 캔버스) · IaBuilder(문제 정의 + 내 IA) · Wireframe · Analysis · Compare(비교·체크리스트·내보내기) · Comments · SettingsModal
+  lib/           bridge(IPC 래퍼, 웹 모드에서는 /api 호출) · supabase · localStore(IndexedDB) · store(백엔드 선택) · study(학습 기록 모델, 린트, 비교, LinkedIn 초안) · exportImage(PNG 합성) · blockTypes
+docs/기능명세서-학습모드.md  학습 모드 기능 명세서 (강의 원칙 → 기능 매핑)
 shared/extract.js  DOM 랜드마크 추출 스크립트, URL 검사 (Electron / 서버 공용)
 api/             Vercel 서버리스 함수 (capture, analyze, health, _lib)
 supabase/schema.sql
@@ -154,5 +157,7 @@ vercel.json      Vercel 웹 배포 설정
 
 - **설정 저장 후에도 "키 없음" 배너가 보임** — 설정 모달에서 **저장** 을 눌렀는지 확인하세요. 저장 파일 위치는 설정 모달 안내 참고.
 - **Supabase 저장 실패: relation does not exist** — `supabase/schema.sql` 을 실행하지 않은 상태입니다.
+- **학습 기록 저장 실패: Could not find the table 'public.studies'** — 예전 schema.sql 로 만든 프로젝트입니다. 최신 `supabase/schema.sql` 을 SQL Editor 에서 다시 실행하면 `studies` 테이블이 추가됩니다.
+- **PNG 내보내기 실패 (CORS)** — 스크린샷이 Supabase 공개 버킷이 아닌 곳에 있으면 브라우저 캔버스가 이미지를 읽지 못합니다. 기본 설정(공개 `screenshots` 버킷)에서는 발생하지 않습니다.
 - **페이지 로딩 타임아웃** — 봇 차단이 강한 사이트는 캡처가 실패할 수 있습니다. 다른 페이지로 시도하거나 캡처 폭을 바꿔 보세요.
 - **아주 긴 페이지** — 설정의 "최대 캡처 높이" 까지만 찍습니다(기본 12,000px).

@@ -44,6 +44,17 @@ create table if not exists public.notes (
 
 create index if not exists notes_reference_id_idx on public.notes (reference_id, created_at);
 
+-- ---------------------------------------------------------------------------
+-- studies: 레퍼런스별 학습 기록 (직접 그린 와이어프레임, 내 IA, 문제 정의, AI 비교 글)
+-- data 구조는 src/lib/study.js 의 normalizeStudy() 참고
+-- ---------------------------------------------------------------------------
+create table if not exists public.studies (
+  reference_id  uuid primary key references public."references"(id) on delete cascade,
+  data          jsonb not null default '{}'::jsonb,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
 -- updated_at 자동 갱신
 create or replace function public.set_updated_at()
 returns trigger language plpgsql as $$
@@ -61,11 +72,16 @@ drop trigger if exists notes_set_updated_at on public.notes;
 create trigger notes_set_updated_at before update on public.notes
   for each row execute function public.set_updated_at();
 
+drop trigger if exists studies_set_updated_at on public.studies;
+create trigger studies_set_updated_at before update on public.studies
+  for each row execute function public.set_updated_at();
+
 -- ---------------------------------------------------------------------------
 -- RLS: anon 역할 허용 (개인용)
 -- ---------------------------------------------------------------------------
 alter table public."references" enable row level security;
 alter table public.notes enable row level security;
+alter table public.studies enable row level security;
 
 drop policy if exists "references anon all" on public."references";
 create policy "references anon all" on public."references"
@@ -73,6 +89,10 @@ create policy "references anon all" on public."references"
 
 drop policy if exists "notes anon all" on public.notes;
 create policy "notes anon all" on public.notes
+  for all to anon, authenticated using (true) with check (true);
+
+drop policy if exists "studies anon all" on public.studies;
+create policy "studies anon all" on public.studies
   for all to anon, authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------
