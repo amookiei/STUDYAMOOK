@@ -7,6 +7,7 @@ import Wireframe from './components/Wireframe';
 import Analysis from './components/Analysis';
 import Comments, { GENERAL_SECTION } from './components/Comments';
 import SettingsModal from './components/SettingsModal';
+import Gate from './components/Gate';
 
 const TABS = [
   { id: 'screenshot', label: '스크린샷' },
@@ -18,6 +19,8 @@ export default function App() {
   const [settings, setSettings] = useState(null);
   const [appInfo, setAppInfo] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 웹 모드 입장 게이트: 'checking' → 'locked' | 'open'. 데스크톱은 항상 'open'.
+  const [gate, setGate] = useState(bridge.isElectron ? 'open' : 'checking');
 
   const [references, setReferences] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
@@ -37,7 +40,7 @@ export default function App() {
   const hasApiKey = bridge.isElectron
     ? Boolean(settings?.anthropicApiKey) || Boolean(appInfo?.hasEnvCredentials)
     : Boolean(appInfo?.server?.anthropicConfigured);
-  const webReady = bridge.isElectron || Boolean(appInfo?.server?.anthropicConfigured && appInfo?.server?.passwordConfigured);
+  const webReady = bridge.isElectron || Boolean(appInfo?.server?.anthropicConfigured && appInfo?.server?.codeConfigured);
 
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
@@ -52,6 +55,15 @@ export default function App() {
         const [s, info] = await Promise.all([bridge.getSettings(), bridge.getAppInfo()]);
         setSettings(s);
         setAppInfo(info);
+        if (!bridge.isElectron) {
+          // 저장된 코드가 있으면 서버에 다시 확인하고, 없거나 틀리면 잠금 화면
+          const saved = bridge.getStudioCode();
+          if (saved && info?.server?.codeConfigured) {
+            try { await bridge.verifyStudioCode(saved); setGate('open'); } catch { bridge.clearStudioCode(); setGate('locked'); }
+          } else {
+            setGate('locked');
+          }
+        }
       } catch (err) {
         showToast(`설정을 불러오지 못했습니다: ${err.message}`, 'error');
         setSettings({});
@@ -108,12 +120,7 @@ export default function App() {
     if (!target) { showToast('분석할 URL 을 입력해 주세요.', 'error'); return; }
     if (!bridge.isElectron) {
       if (!webReady) {
-        showToast('서버에 ANTHROPIC_API_KEY 와 APP_ACCESS_PASSWORD 환경 변수가 아직 설정되지 않았습니다. Vercel 프로젝트 설정에서 추가해 주세요.', 'error');
-        return;
-      }
-      if (!settings?.accessPassword) {
-        showToast('설정에서 서버 접근 비밀번호를 입력해 주세요.', 'error');
-        setSettingsOpen(true);
+        showToast('서버에 ANTHROPIC_API_KEY 환경 변수가 아직 설정되지 않았습니다. Vercel 프로젝트 설정에서 추가해 주세요.', 'error');
         return;
       }
       if (store.kind !== 'supabase') {
@@ -155,10 +162,11 @@ export default function App() {
       if (!saved.unsaved) showToast('분석을 완료하고 저장했습니다.');
     } catch (err) {
       showToast(err.message || String(err), 'error');
+      if (err.code === 'invalid_code') { bridge.clearStudioCode(); setGate('locked'); }
     } finally {
       setJob(null);
     }
-  }, [job, url, hasApiKey, store, refreshLibrary, showToast]);
+  }, [job, url, hasApiKey, webReady, store, refreshLibrary, showToast]);
 
   const cancelJob = useCallback(async () => {
     await bridge.cancelAnalysis();
@@ -208,9 +216,7 @@ export default function App() {
       if (appInfo && !appInfo.server) {
         banner = { type: 'warn', text: `서버 API 에 연결하지 못했습니다${appInfo.serverError ? ` (${appInfo.serverError})` : ''}. Vercel 배포 상태를 확인해 주세요.` };
       } else if (appInfo && !webReady) {
-        banner = { type: 'warn', text: '서버에 ANTHROPIC_API_KEY 와 APP_ACCESS_PASSWORD 환경 변수가 설정되지 않았습니다. Vercel 프로젝트 설정 → Environment Variables 에 추가하고 다시 배포하면 웹에서도 분석할 수 있습니다.' };
-      } else if (!settings.accessPassword) {
-        banner = { type: 'info', text: '웹 모드입니다. 설정(⚙)에서 서버 접근 비밀번호와 Supabase 정보를 입력하면 바로 분석할 수 있습니다.' };
+        banner = { type: 'warn', text: '서버에 ANTHROPIC_API_KEY 환경 변수가 설정되지 않았습니다. Vercel 프로젝트 설정 → Environment Variables 에 추가하고 다시 배포하면 웹에서도 분석할 수 있습니다.' };
       } else if (store?.kind !== 'supabase') {
         banner = { type: 'info', text: '웹에서 분석한 결과는 Supabase 에 저장됩니다. 설정(⚙)에서 Supabase URL 과 anon key 를 입력해 주세요.' };
       }
@@ -219,6 +225,18 @@ export default function App() {
     } else if (store?.kind !== 'supabase') {
       banner = { type: 'info', text: 'Supabase 가 설정되지 않아 결과를 이 PC 에만 저장합니다. 설정에서 Supabase URL 과 anon key 를 입력하면 클라우드에 저장됩니다.' };
     }
+  }
+
+  if (gate === 'checking') {
+    return <div className="gate"><div className="gate__card"><p className="muted">확인 중…</p></div></div>;
+  }
+  if (gate === 'locked') {
+    return (
+      <Gate
+        serverInfo={appInfo ? (appInfo.server ?? null) : undefined}
+        onVerify={async (code) => { await bridge.verifyStudioCode(code); setGate('open'); }}
+      />
+    );
   }
 
   return (
@@ -244,6 +262,9 @@ export default function App() {
           )}
         </form>
         <button type="button" className="btn btn--ghost" onClick={() => setSettingsOpen(true)} title="설정">⚙ 설정</button>
+        {!bridge.isElectron && (
+          <button type="button" className="btn btn--ghost" title="입장 코드를 지우고 잠급니다" onClick={() => { bridge.clearStudioCode(); setGate('locked'); }}>잠금</button>
+        )}
       </header>
 
       {banner && (
@@ -317,9 +338,9 @@ export default function App() {
                 </ol>
               ) : (
                 <ol>
-                  <li>설정(⚙)에서 서버 접근 비밀번호(Vercel 의 APP_ACCESS_PASSWORD)를 입력합니다.</li>
-                  <li>Supabase URL 과 anon key 를 입력합니다. 스크린샷과 분석 결과가 Supabase 에 저장됩니다.</li>
+                  <li>설정(⚙)에서 Supabase URL 과 anon key 를 입력합니다. 스크린샷과 분석 결과가 Supabase 에 저장됩니다.</li>
                   <li>URL 을 입력하고 분석을 시작합니다. 서버에서 캡처(10~40초)와 Claude 분석(1~3분)이 진행됩니다.</li>
+                  <li>Anthropic 키는 Vercel 환경 변수에만 있고 브라우저로 내려오지 않습니다.</li>
                 </ol>
               )}
               {appInfo?.version && <p className="muted small">v{appInfo.version}{appInfo.electron ? ` · Electron ${appInfo.electron}` : ''}</p>}

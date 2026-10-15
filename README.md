@@ -83,9 +83,10 @@ GitHub 저장소를 Vercel 에 연결해 두면 푸시할 때마다 자동으로
    | 변수 | 값 |
    | --- | --- |
    | `ANTHROPIC_API_KEY` | Anthropic 콘솔에서 발급한 키. 브라우저에는 절대 내려가지 않고 서버 함수만 사용합니다. |
-   | `APP_ACCESS_PASSWORD` | 아무 문자열. 이 비밀번호를 아는 사람만 분석을 실행할 수 있어 키 비용을 보호합니다. |
-2. 배포된 사이트의 설정(⚙)에서 **서버 접근 비밀번호**, **Supabase URL / anon key** 를 입력합니다. 스크린샷과 결과는 Supabase 에 저장됩니다(`supabase/schema.sql` 실행 필요).
-3. URL 을 입력하고 **분석 시작**. 서버에서 캡처(10~40초)와 Claude 분석(1~3분)이 차례로 진행됩니다.
+   | `STUDIO_CODE` | 나만 아는 입장 코드. 웹을 열면 이 코드를 입력해야 앱이 보이고, 모든 서버 호출에도 이 코드가 필요합니다. |
+2. 배포된 사이트를 열고 **입장 코드**를 입력합니다 (이 브라우저에만 저장되며, 상단 "잠금" 버튼으로 지울 수 있습니다).
+3. 설정(⚙)에서 **Supabase URL / anon key** 를 입력합니다. 스크린샷과 결과는 Supabase 에 저장됩니다(`supabase/schema.sql` 실행 필요).
+4. URL 을 입력하고 **분석 시작**. 서버에서 캡처(10~40초)와 Claude 분석(1~3분)이 차례로 진행됩니다.
 
 서버리스 함수 구성:
 
@@ -93,7 +94,7 @@ GitHub 저장소를 Vercel 에 연결해 두면 푸시할 때마다 자동으로
 | --- | --- | --- |
 | `api/capture.js` | 헤드리스 Chromium(@sparticuz/chromium + playwright-core)으로 렌더링 → 랜드마크 추출 → 스크롤 분할 캡처를 sharp 로 이어 붙여 Supabase 스토리지에 업로드 | 최대 120초, 폭 1920px·높이 12000px |
 | `api/analyze.js` | 스토리지의 PNG 를 내려받아 타일로 자르고 Claude 호출 | 최대 300초 (Hobby 의 Fluid compute 상한) |
-| `api/health.js` | 서버 설정 상태, 모델 목록, 연결 테스트 | |
+| `api/health.js` | 서버 설정 상태, 모델 목록, 입장 코드 확인, 연결 테스트 | |
 
 - 내부망/사설 IP 주소 캡처는 서버에서 차단합니다(SSRF 방지).
 - 함수 실행 시간이 300초를 넘기면 Vercel 이 요청을 끊습니다. 긴 페이지는 설정의 최대 캡처 높이를 줄이거나 Sonnet/Haiku 모델을 쓰세요.
@@ -111,7 +112,7 @@ GitHub 저장소를 Vercel 에 연결해 두면 푸시할 때마다 자동으로
 Claude 호출에는 Anthropic 계정의 자격 증명이 반드시 필요합니다. 다만 "설정 화면에 키를 붙여넣는" 방식 말고도 다음이 됩니다.
 
 - **데스크톱**: 설정의 키를 비워 두면 SDK 가 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` 환경 변수나 `ant auth login` 으로 만든 프로필(`~/.config/anthropic/`)을 자동으로 씁니다.
-- **웹**: 키는 Vercel 환경 변수에만 있고 사용자는 접근 비밀번호만 입력합니다. 장기 키 대신 Vercel OIDC 와 Anthropic Workload Identity Federation 을 연결해 단기 토큰을 쓰는 방법도 있습니다.
+- **웹**: 키는 Vercel 환경 변수에만 있고 사용자는 입장 코드만 입력합니다. 장기 키 대신 Vercel OIDC 와 Anthropic Workload Identity Federation 을 연결해 단기 토큰을 쓰는 방법도 있습니다.
 
 ## 폴더 구조
 
