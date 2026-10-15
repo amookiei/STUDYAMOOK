@@ -665,9 +665,9 @@ export default function App() {
             </>
           ) : flow ? (
             <>
-              {flowState !== 'idle' && STUDY_STATE_LABEL[flowState] && <span className={`save-state save-state--${flowState} flow__save-state`}>{STUDY_STATE_LABEL[flowState].replace('학습 기록', '플로우')}</span>}
               <FlowCanvas
                 flow={flow}
+                saveState={flowState !== 'idle' && STUDY_STATE_LABEL[flowState] ? { state: flowState, label: STUDY_STATE_LABEL[flowState].replace('학습 기록', '플로우') } : null}
                 refsById={flowRefs}
                 studiesById={flowStudies}
                 allReferences={references}
