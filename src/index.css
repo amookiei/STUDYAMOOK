@@ -349,17 +349,26 @@ textarea.input { resize: vertical; }
 .flow-item__name { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .flow-back { font-size: 12px; margin-bottom: 2px; display: inline-block; }
 .flow { display: flex; flex-direction: column; height: 100%; }
-.flow__save-state { padding: 6px 18px 0; }
 .flow__toolbar { flex-wrap: wrap; row-gap: 6px; }
 .flow__name { width: 280px; font-weight: 650; }
 .flow__add { width: 260px; }
 .flow__body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 290px; }
-.flow__canvas-wrap { overflow: auto; background: #e9ecef; position: relative; touch-action: none; }
-.flow__canvas { position: relative; background-color: #f1f3f5; background-image: radial-gradient(#cfd4da 1px, transparent 1px); background-size: 24px 24px; }
-.flow__edges { position: absolute; inset: 0; pointer-events: none; }
+.flow__canvas-wrap { overflow: hidden; position: relative; touch-action: none; user-select: none; background-color: #f1f3f5; background-image: radial-gradient(#cfd4da 1px, transparent 1px); background-size: 24px 24px; cursor: default; }
+.flow__canvas-wrap--hand { cursor: grab; }
+.flow__canvas-wrap--hand .flow-node, .flow__canvas-wrap--hand .port { cursor: grab; }
+.flow__canvas-wrap--panning { cursor: grabbing; }
+.flow__canvas { position: absolute; left: 0; top: 0; width: 0; height: 0; overflow: visible; transform-origin: 0 0; }
+.flow__edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.flow__overlay { position: absolute; inset: 0; pointer-events: none; }
+.flow__overlay > * { pointer-events: auto; }
+.flow__zoom { position: absolute; right: 14px; bottom: 14px; display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: #fff; box-shadow: var(--shadow); z-index: 5; }
+.flow__zoom button { border: 0; background: #fff; padding: 5px 10px; font: inherit; cursor: pointer; min-width: 34px; }
+.flow__zoom button:hover:not(:disabled) { background: #f1f3f5; }
+.flow__zoom button:disabled { opacity: 0.5; cursor: default; }
+.flow__hint { position: absolute; left: 14px; bottom: 16px; z-index: 5; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 260px); }
 .flow-edge { pointer-events: visibleStroke; cursor: pointer; }
 .flow-edge text { pointer-events: none; }
-.flow-node { position: absolute; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); user-select: none; cursor: grab; display: flex; flex-direction: column; }
+.flow-node { position: absolute; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); user-select: none; cursor: default; display: flex; flex-direction: column; }
 .flow-node--selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(76, 110, 245, 0.25); }
 .flow-node--target { outline: 2px dashed #e03131; outline-offset: 3px; }
 .flow-node__head { padding: 8px 10px 4px; }

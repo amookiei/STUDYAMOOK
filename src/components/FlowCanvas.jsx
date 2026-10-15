@@ -1,25 +1,52 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { uid } from '../lib/study';
 import { NODE_W, functionUnitsOf, unitLabel, nextNodePosition, buildFlowMarkdown } from '../lib/flow';
 
 // 여러 페이지(레퍼런스)를 노드로 놓고, 기능 단위 블록에서 다음 페이지로 연결선을 긋는 캔버스.
 // 연결은 "정보/기능 단위" 블록에서만 출발한다. 컴포넌트(버튼 등)는 연결 지점이 아니다.
-const CANVAS_W = 2600;
-const CANVAS_H = 1800;
+//
+// 마우스 조작은 피그마와 같게 맞춘다:
+//   휠 = 위아래 이동 · Shift+휠 = 좌우 이동 · Ctrl/⌘+휠(핀치) = 커서 기준 확대/축소
+//   Space+드래그 / 가운데 버튼 드래그 = 손 도구(화면 이동) · 빈 곳 드래그 = 범위 선택
+//   클릭 = 선택 · Shift+클릭 = 추가/해제 · 선택한 노드 드래그 = 함께 이동 · 더블클릭 = 상세 열기
+//   Delete/Backspace = 삭제 · Esc = 선택 해제 · Ctrl+A = 전체 선택
+//   Ctrl+0 = 100% · Ctrl+(+)/(-) = 확대/축소 · Shift+1 = 전체 맞춤 · Shift+2 = 선택 맞춤
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 4;
+const ZOOM_STEPS = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
 
 function hostOf(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url || ''; } }
 
-export default function FlowCanvas({ flow, refsById, studiesById, allReferences, onChange, onOpenNode, onDeleteFlow, onToast }) {
-  const canvasRef = useRef(null);
+export default function FlowCanvas({ flow, refsById, studiesById, allReferences, saveState, onChange, onOpenNode, onDeleteFlow, onToast }) {
+  const canvasRef = useRef(null); // 뷰포트 (스크롤 대신 transform 으로 이동/확대)
   const portRefs = useRef(new Map());
   const nodeRefs = useRef(new Map());
   const dragRef = useRef(null);
+  const viewRef = useRef({ x: 40, y: 40, z: 1 });
+  const [view, setViewState] = useState(viewRef.current); // { x, y, z }: 화면 = 월드 * z + (x, y)
   const [geom, setGeom] = useState({ ports: {}, nodes: {} });
-  const [selected, setSelected] = useState(null); // { type: 'node'|'edge', id }
-  const [connecting, setConnecting] = useState(null); // { fromNode, block, source, x1, y1, x2, y2 }
+  const [selectedIds, setSelectedIds] = useState([]); // 선택한 노드 id 들
+  const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+  const [connecting, setConnecting] = useState(null); // { fromNode, block, source, x1, y1, x2, y2 } (월드 좌표)
+  const [marquee, setMarquee] = useState(null); // { x0, y0, x1, y1 } (월드 좌표)
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [panning, setPanning] = useState(false);
   const [dragTick, setDragTick] = useState(0);
   const [addRefId, setAddRefId] = useState('');
   const [copied, setCopied] = useState(false);
+
+  const setView = useCallback((next) => {
+    const v = typeof next === 'function' ? next(viewRef.current) : next;
+    const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.z));
+    viewRef.current = { x: v.x, y: v.y, z };
+    setViewState(viewRef.current);
+  }, []);
+  const selected = selectedEdgeId ? { type: 'edge', id: selectedEdgeId } : selectedIds.length === 1 ? { type: 'node', id: selectedIds[0] } : null;
+  const setSelected = (sel) => {
+    if (!sel) { setSelectedIds([]); setSelectedEdgeId(null); }
+    else if (sel.type === 'edge') { setSelectedIds([]); setSelectedEdgeId(sel.id); }
+    else { setSelectedIds([sel.id]); setSelectedEdgeId(null); }
+  };
 
   const nodeById = useMemo(() => Object.fromEntries(flow.nodes.map((n) => [n.id, n])), [flow.nodes]);
   const units = useMemo(() => {
@@ -35,40 +62,111 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
     const c = canvasRef.current;
     if (!c) return;
     const cr = c.getBoundingClientRect();
+    const { x: vx, y: vy, z } = viewRef.current;
     const ports = {};
     const nodes = {};
     portRefs.current.forEach((el, key) => {
       if (!el) return;
       const r = el.getBoundingClientRect();
-      ports[key] = { x: r.left + r.width / 2 - cr.left + c.scrollLeft, y: r.top + r.height / 2 - cr.top + c.scrollTop };
+      ports[key] = { x: (r.left + r.width / 2 - cr.left - vx) / z, y: (r.top + r.height / 2 - cr.top - vy) / z };
     });
     nodeRefs.current.forEach((el, key) => {
       if (!el) return;
       const r = el.getBoundingClientRect();
-      nodes[key] = { x: r.left - cr.left + c.scrollLeft, y: r.top - cr.top + c.scrollTop, w: r.width, h: r.height };
+      nodes[key] = { x: (r.left - cr.left - vx) / z, y: (r.top - cr.top - vy) / z, w: r.width / z, h: r.height / z };
     });
     setGeom((g) => (JSON.stringify(g.ports) === JSON.stringify(ports) && JSON.stringify(g.nodes) === JSON.stringify(nodes) ? g : { ports, nodes }));
-  }, [flow.nodes, flow.edges, units, dragTick]);
+  }, [flow.nodes, flow.edges, units, dragTick, view]);
 
+  // 화면 좌표 → 월드 좌표
   const toCanvas = (e) => {
-    const c = canvasRef.current;
-    const cr = c.getBoundingClientRect();
-    return { x: e.clientX - cr.left + c.scrollLeft, y: e.clientY - cr.top + c.scrollTop };
+    const cr = canvasRef.current.getBoundingClientRect();
+    const { x, y, z } = viewRef.current;
+    return { x: (e.clientX - cr.left - x) / z, y: (e.clientY - cr.top - y) / z };
   };
 
-  // ---- 노드 드래그 ----
+  // ---- 확대/축소/이동 ----
+  const zoomAt = useCallback((factor, clientX, clientY) => {
+    const cr = canvasRef.current.getBoundingClientRect();
+    const cx = clientX == null ? cr.width / 2 : clientX - cr.left;
+    const cy = clientY == null ? cr.height / 2 : clientY - cr.top;
+    setView((v) => {
+      const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.z * factor));
+      const k = z / v.z;
+      return { x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k, z };
+    });
+  }, [setView]);
+  const zoomTo = useCallback((z) => zoomAt(z / viewRef.current.z), [zoomAt]);
+  const fitTo = useCallback((ids) => {
+    const boxes = Object.entries(geom.nodes).filter(([id]) => !ids || ids.includes(id)).map(([, b]) => b);
+    const c = canvasRef.current;
+    if (!boxes.length || !c) return;
+    const minX = Math.min(...boxes.map((b) => b.x)); const minY = Math.min(...boxes.map((b) => b.y));
+    const maxX = Math.max(...boxes.map((b) => b.x + b.w)); const maxY = Math.max(...boxes.map((b) => b.y + b.h));
+    const cr = c.getBoundingClientRect();
+    const pad = 60;
+    const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min((cr.width - pad * 2) / (maxX - minX), (cr.height - pad * 2) / (maxY - minY), 1.5)));
+    setView({ z, x: (cr.width - (maxX - minX) * z) / 2 - minX * z, y: (cr.height - (maxY - minY) * z) / 2 - minY * z });
+  }, [geom.nodes, setView]);
+
+  // 휠: 이동 / Shift+휠: 좌우 / Ctrl(⌘)+휠·핀치: 커서 기준 확대. (React 의 onWheel 은 passive 라 preventDefault 가 안 되므로 직접 붙인다)
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!c) return undefined;
+    const onWheel = (e) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025));
+        zoomAt(factor, e.clientX, e.clientY);
+        return;
+      }
+      const dx = e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX;
+      const dy = e.shiftKey && e.deltaX === 0 ? 0 : e.deltaY;
+      setView((v) => ({ ...v, x: v.x - dx, y: v.y - dy }));
+    };
+    c.addEventListener('wheel', onWheel, { passive: false });
+    return () => c.removeEventListener('wheel', onWheel);
+  }, [zoomAt, setView]);
+
+  const startPan = (e) => {
+    dragRef.current = { mode: 'pan', sx: e.clientX, sy: e.clientY, ox: viewRef.current.x, oy: viewRef.current.y };
+    setPanning(true);
+    canvasRef.current.setPointerCapture(e.pointerId);
+  };
+
+  // ---- 노드 선택/드래그 ----
   const onNodeDown = (e, node) => {
+    if (e.button === 1 || (e.button === 0 && spaceHeld)) { e.stopPropagation(); e.preventDefault(); startPan(e); return; }
     if (e.button !== 0) return;
     if (e.target.closest('button, a, .port')) return;
     e.stopPropagation();
-    setSelected({ type: 'node', id: node.id });
+    let ids;
+    if (e.shiftKey) {
+      ids = selectedIds.includes(node.id) ? selectedIds.filter((id) => id !== node.id) : [...selectedIds, node.id];
+      setSelectedIds(ids); setSelectedEdgeId(null);
+      if (!ids.includes(node.id)) return; // 해제만 하고 드래그는 시작하지 않는다
+    } else {
+      ids = selectedIds.includes(node.id) ? selectedIds : [node.id];
+      setSelectedIds(ids); setSelectedEdgeId(null);
+    }
     const p = toCanvas(e);
-    dragRef.current = { mode: 'node', id: node.id, dx: p.x - node.x, dy: p.y - node.y, moved: false };
+    const orig = Object.fromEntries(flow.nodes.filter((n) => ids.includes(n.id)).map((n) => [n.id, { x: n.x, y: n.y }]));
+    dragRef.current = { mode: 'node', ids, start: p, orig, moved: false };
+    canvasRef.current.setPointerCapture(e.pointerId);
+  };
+  // 빈 캔버스: 손 도구(Space/가운데 버튼) 또는 범위 선택
+  const onCanvasDown = (e) => {
+    if (e.target.closest('.flow-node, .flow-edge, .flow__zoom')) return;
+    if (e.button === 1 || (e.button === 0 && spaceHeld)) { e.preventDefault(); startPan(e); return; }
+    if (e.button !== 0) return;
+    const p = toCanvas(e);
+    dragRef.current = { mode: 'marquee', start: p, additive: e.shiftKey, base: e.shiftKey ? selectedIds : [] };
+    if (!e.shiftKey) { setSelectedIds([]); setSelectedEdgeId(null); }
     canvasRef.current.setPointerCapture(e.pointerId);
   };
   // ---- 포트에서 연결선 끌기 ----
   const onPortDown = (e, node, unit) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || spaceHeld) return;
     e.stopPropagation();
     const p = toCanvas(e);
     dragRef.current = { mode: 'connect' };
@@ -78,15 +176,24 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
   const onMove = (e) => {
     const d = dragRef.current;
     if (!d) return;
+    if (d.mode === 'pan') {
+      setView((v) => ({ ...v, x: d.ox + (e.clientX - d.sx), y: d.oy + (e.clientY - d.sy) }));
+      return;
+    }
     const p = toCanvas(e);
     if (d.mode === 'node') {
-      d.moved = true;
-      const x = Math.max(0, Math.min(CANVAS_W - NODE_W, p.x - d.dx));
-      const y = Math.max(0, Math.min(CANVAS_H - 100, p.y - d.dy));
-      onChange({ ...flow, nodes: flow.nodes.map((n) => (n.id === d.id ? { ...n, x: Math.round(x), y: Math.round(y) } : n)) }, { silent: true });
+      const dx = p.x - d.start.x; const dy = p.y - d.start.y;
+      if (Math.abs(dx) + Math.abs(dy) > 1) d.moved = true;
+      if (!d.moved) return;
+      onChange({ ...flow, nodes: flow.nodes.map((n) => (d.orig[n.id] ? { ...n, x: Math.round(d.orig[n.id].x + dx), y: Math.round(d.orig[n.id].y + dy) } : n)) }, { silent: true });
       setDragTick((t) => t + 1);
     } else if (d.mode === 'connect') {
       setConnecting((c) => (c ? { ...c, x2: p.x, y2: p.y } : c));
+    } else if (d.mode === 'marquee') {
+      const box = { x0: Math.min(d.start.x, p.x), y0: Math.min(d.start.y, p.y), x1: Math.max(d.start.x, p.x), y1: Math.max(d.start.y, p.y) };
+      setMarquee(box);
+      const hit = Object.entries(geom.nodes).filter(([, b]) => b.x < box.x1 && b.x + b.w > box.x0 && b.y < box.y1 && b.y + b.h > box.y0).map(([id]) => id);
+      setSelectedIds(Array.from(new Set([...d.base, ...hit])));
     }
   };
   const onUp = (e) => {
@@ -94,6 +201,8 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
     dragRef.current = null;
     try { canvasRef.current.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     if (!d) return;
+    if (d.mode === 'pan') { setPanning(false); return; }
+    if (d.mode === 'marquee') { setMarquee(null); return; }
     if (d.mode === 'node') {
       if (d.moved) onChange({ ...flow }); // 이동 결과 저장
       return;
@@ -123,13 +232,16 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
     setAddRefId('');
     setSelected({ type: 'node', id: node.id });
   };
-  const removeNode = (id) => {
-    const node = nodeById[id];
-    const r = refsById[node?.reference_id];
-    if (!window.confirm(`"${r ? (r.title || r.url) : '이 페이지'}" 노드와 연결선을 플로우에서 뺄까요? (레퍼런스 자체는 남습니다)`)) return;
-    onChange({ ...flow, nodes: flow.nodes.filter((n) => n.id !== id), edges: flow.edges.filter((e) => e.from.node !== id && e.to.node !== id) });
+  const removeNodes = (ids) => {
+    if (!ids.length) return;
+    const names = ids.map((id) => { const r = refsById[nodeById[id]?.reference_id]; return r ? (r.title || r.url) : '이 페이지'; });
+    const label = ids.length === 1 ? `"${names[0]}" 노드와 연결선을` : `노드 ${ids.length}개와 연결선을`;
+    if (!window.confirm(`${label} 플로우에서 뺄까요? (레퍼런스 자체는 남습니다)`)) return;
+    const gone = new Set(ids);
+    onChange({ ...flow, nodes: flow.nodes.filter((n) => !gone.has(n.id)), edges: flow.edges.filter((e) => !gone.has(e.from.node) && !gone.has(e.to.node)) });
     setSelected(null);
   };
+  const removeNode = (id) => removeNodes([id]);
   const patchEdge = (id, patch) => onChange({ ...flow, edges: flow.edges.map((e) => (e.id === id ? { ...e, ...patch } : e)) });
   const removeEdge = (id) => { onChange({ ...flow, edges: flow.edges.filter((e) => e.id !== id) }); setSelected(null); };
   const copySummary = async () => {
@@ -138,6 +250,34 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
       setCopied(true); setTimeout(() => setCopied(false), 2000);
     } catch (err) { onToast && onToast(`복사 실패: ${err.message}`, 'error'); }
   };
+
+  // ---- 단축키 (입력창 밖에서만) ----
+  useEffect(() => {
+    const inField = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+    const onKeyDown = (e) => {
+      if (inField(e.target)) { if (e.key === 'Escape') e.target.blur(); return; }
+      if (e.code === 'Space') { if (!e.repeat) setSpaceHeld(true); e.preventDefault(); return; }
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key === '0') { e.preventDefault(); zoomTo(1); return; }
+      if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); zoomAt(1.25); return; }
+      if (mod && e.key === '-') { e.preventDefault(); zoomAt(0.8); return; }
+      if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); setSelectedIds(flow.nodes.map((n) => n.id)); setSelectedEdgeId(null); return; }
+      if (e.shiftKey && (e.key === '1' || e.key === '!')) { e.preventDefault(); fitTo(null); return; }
+      if (e.shiftKey && (e.key === '2' || e.key === '@')) { e.preventDefault(); if (selectedIds.length) fitTo(selectedIds); return; }
+      if (e.key === 'Escape') { setSelected(null); setConnecting(null); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        if (selectedEdgeId) removeEdge(selectedEdgeId);
+        else if (selectedIds.length) removeNodes(selectedIds);
+      }
+    };
+    const onKeyUp = (e) => { if (e.code === 'Space') setSpaceHeld(false); };
+    const onBlur = () => setSpaceHeld(false);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', onBlur); };
+  });
 
   const edgePath = (e) => {
     const p1 = geom.ports[`${e.from.node}:${e.from.block}`] || (geom.nodes[e.from.node] && { x: geom.nodes[e.from.node].x + geom.nodes[e.from.node].w, y: geom.nodes[e.from.node].y + 40 });
@@ -157,6 +297,7 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
       <div className="toolbar flow__toolbar">
         <input className="input flow__name" value={flow.name} onChange={(e) => onChange({ ...flow, name: e.target.value })} placeholder="플로우 이름 (예: 회원가입 → 첫 결제)" />
         <span className="muted small">페이지 {flow.nodes.length} · 연결 {flow.edges.length}</span>
+        <span className={`save-state${saveState ? ` save-state--${saveState.state}` : ''}`}>{saveState ? saveState.label : ''}</span>
         <div className="toolbar__spacer" />
         <select className="input flow__add" value={addRefId} onChange={(e) => addNode(e.target.value)}>
           <option value="">+ 라이브러리에서 페이지 추가…</option>
@@ -168,14 +309,16 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
       <div className="flow__body">
         <div
           ref={canvasRef}
-          className="flow__canvas-wrap"
+          className={`flow__canvas-wrap${spaceHeld || panning ? ' flow__canvas-wrap--hand' : ''}${panning ? ' flow__canvas-wrap--panning' : ''}`}
+          style={{ backgroundSize: `${24 * view.z}px ${24 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}
+          onPointerDown={onCanvasDown}
           onPointerMove={onMove}
           onPointerUp={onUp}
           onPointerCancel={onUp}
-          onPointerDown={(e) => { if (e.target === e.currentTarget || e.target.classList.contains('flow__canvas')) setSelected(null); }}
+          onContextMenu={(e) => e.preventDefault()}
         >
-          <div className="flow__canvas" style={{ width: CANVAS_W, height: CANVAS_H }}>
-            <svg className="flow__edges" width={CANVAS_W} height={CANVAS_H}>
+          <div className="flow__canvas" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
+            <svg className="flow__edges" width="1" height="1" style={{ overflow: 'visible' }}>
               <defs>
                 <marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#4c6ef5" />
@@ -198,13 +341,16 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
               {connecting && (
                 <path d={`M ${connecting.x1} ${connecting.y1} L ${connecting.x2} ${connecting.y2}`} fill="none" stroke="#e03131" strokeWidth="2" strokeDasharray="6 4" />
               )}
+              {marquee && (
+                <rect x={marquee.x0} y={marquee.y0} width={marquee.x1 - marquee.x0} height={marquee.y1 - marquee.y0} fill="rgba(76,110,245,0.12)" stroke="#4c6ef5" strokeWidth={1 / view.z} />
+              )}
             </svg>
 
             {flow.nodes.map((n) => {
               const r = refsById[n.reference_id];
               const s = studiesById[n.reference_id];
               const u = units[n.id] || { units: [], components: [], fallback: false };
-              const sel = selNode?.id === n.id;
+              const sel = selectedIds.includes(n.id);
               const outCount = flow.edges.filter((e) => e.from.node === n.id).length;
               return (
                 <div
@@ -252,6 +398,15 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
               );
             })}
 
+          </div>
+          <div className="flow__zoom" onPointerDown={(e) => e.stopPropagation()}>
+            <button type="button" title="축소 (Ctrl+-)" onClick={() => zoomAt(0.8)}>−</button>
+            <button type="button" title="100% (Ctrl+0)" onClick={() => zoomTo(1)}>{Math.round(view.z * 100)}%</button>
+            <button type="button" title="확대 (Ctrl++)" onClick={() => zoomAt(1.25)}>+</button>
+            <button type="button" title="전체 맞춤 (Shift+1)" onClick={() => fitTo(null)} disabled={!flow.nodes.length}>맞춤</button>
+          </div>
+          <div className="flow__hint muted small">휠 이동 · Shift+휠 좌우 · Ctrl+휠 확대 · Space+드래그 이동 · 빈 곳 드래그 범위 선택 · Shift+클릭 다중 선택 · Delete 삭제</div>
+          <div className="flow__overlay">
             {flow.nodes.length === 0 && (
               <div className="flow__empty">
                 <h2>페이지를 노드로 놓고 흐름을 그려 보세요</h2>
@@ -315,7 +470,19 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
             </div>
           )}
 
-          {!selNode && !selEdge && (
+          {!selNode && !selEdge && selectedIds.length > 1 && (
+            <div className="inspector">
+              <h4>노드 {selectedIds.length}개 선택</h4>
+              <ul className="small">{selectedIds.map((id) => <li key={id}>{titleOf(id)}</li>)}</ul>
+              <div className="inspector__actions">
+                <button type="button" className="btn btn--sm" onClick={() => fitTo(selectedIds)}>선택 맞춤 (Shift+2)</button>
+                <button type="button" className="btn btn--sm btn--ghost link--danger" onClick={() => removeNodes(selectedIds)}>플로우에서 빼기</button>
+              </div>
+              <p className="muted small">드래그하면 함께 이동합니다. Shift+클릭으로 선택을 더하거나 뺄 수 있습니다.</p>
+            </div>
+          )}
+
+          {!selNode && !selEdge && selectedIds.length <= 1 && (
             <div className="inspector">
               <h4>플로우</h4>
               <label className="field"><span className="field__label">설명</span>
@@ -328,6 +495,14 @@ export default function FlowCanvas({ flow, refsById, studiesById, allReferences,
                 <li>노드를 더블클릭하거나 "상세 학습 열기"로 들어가 내 와이어프레임에서 기능 단위 블록을 그립니다.</li>
                 <li>노드의 기능 단위 옆 점(●)을 끌어 다음 페이지에 놓으면 연결됩니다. 연결을 클릭해 전환 조건을 적습니다.</li>
               </ol>
+              <h4>마우스·단축키 (피그마와 같음)</h4>
+              <ul className="small">
+                <li>휠: 위아래 이동 · Shift+휠: 좌우 이동 · Ctrl(⌘)+휠 / 핀치: 커서 기준 확대·축소</li>
+                <li>Space+드래그 또는 가운데 버튼 드래그: 화면 이동</li>
+                <li>빈 곳 드래그: 범위 선택 · Shift+클릭: 다중 선택 · 선택 드래그: 함께 이동</li>
+                <li>Delete: 삭제 · Esc: 선택 해제 · Ctrl+A: 전체 선택</li>
+                <li>Ctrl+0: 100% · Ctrl+(+/-): 확대·축소 · Shift+1: 전체 맞춤 · Shift+2: 선택 맞춤</li>
+              </ul>
               <p className="lint">원칙: 버튼은 정보가 아니다. 연결은 컴포넌트가 아니라 정보/기능 단위에서 출발합니다.</p>
             </div>
           )}
