@@ -10,7 +10,7 @@ function formatDate(iso) {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export default function Library({ references, selectedId, loading, storeKind, onSelect, onDelete, onRefresh }) {
+export default function Library({ references, selectedId, loading, storeKind, onSelect, onDelete, onRefresh, flows = [], currentFlowId, onOpenFlow, onNewFlow, onCloseFlow }) {
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
@@ -35,6 +35,25 @@ export default function Library({ references, selectedId, loading, storeKind, on
         ) : (
           <span className="pill pill--warn" title="설정에서 Supabase 를 연결하면 클라우드에 저장됩니다">로컬 저장 (Supabase 미설정)</span>
         )}
+      </div>
+      <div className="flows">
+        <div className="flows__head">
+          <h2>플로우</h2>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={onNewFlow} title="여러 페이지를 노드로 잇는 화면 흐름">+ 새 플로우</button>
+        </div>
+        {flows.length === 0 && <p className="muted small flows__empty">페이지들을 노드로 놓고 기능 단위에서 다음 페이지로 잇는 흐름을 만들 수 있습니다.</p>}
+        {flows.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            className={`flow-item${f.id === currentFlowId ? ' flow-item--active' : ''}`}
+            onClick={() => (f.id === currentFlowId ? onCloseFlow() : onOpenFlow(f))}
+            title={f.id === currentFlowId ? '클릭하면 플로우를 닫습니다' : '플로우 열기'}
+          >
+            <span className="flow-item__name">{f.name || '이름 없음'}</span>
+            <span className="muted small">{(f.nodes || []).length}p · {(f.edges || []).length}↗</span>
+          </button>
+        ))}
       </div>
       <input
         className="input library__search"

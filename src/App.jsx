@@ -11,8 +11,10 @@ import Gate from './components/Gate';
 import Studio from './components/Studio';
 import IaBuilder from './components/IaBuilder';
 import Compare from './components/Compare';
+import FlowCanvas from './components/FlowCanvas';
 import { prepareManualScreenshot, buildManualCapture } from './lib/manualCapture';
-import { normalizeStudy, orderedNodes } from './lib/study';
+import { normalizeStudy, orderedNodes, uid } from './lib/study';
+import { emptyFlow, normalizeFlow, nextNodePosition } from './lib/flow';
 
 // ai: true 인 탭은 학습 기록(study.revealed)이 공개되기 전까지 가려진다 — 먼저 직접 그린 뒤 AI 와 비교하는 흐름.
 const TABS = [
@@ -42,6 +44,15 @@ export default function App() {
   const [study, setStudy] = useState(null);
   const [studyState, setStudyState] = useState('idle'); // idle | dirty | saving | saved | error | local
   const studyRef = useRef({ id: null, data: null, dirty: false, timer: null, errorShown: false });
+
+  // 플로우(여러 페이지를 잇는 화면 흐름)
+  const [flows, setFlows] = useState([]);
+  const [flow, setFlow] = useState(null); // 열려 있는 플로우
+  const [flowRefs, setFlowRefs] = useState({}); // reference_id → 전체 row
+  const [flowStudies, setFlowStudies] = useState({}); // reference_id → study
+  const [flowState, setFlowState] = useState('idle');
+  const flowRef = useRef({ data: null, dirty: false, timer: null, errorShown: false });
+  const flowsErrorShown = useRef(false);
 
   const [url, setUrl] = useState('');
   const [tab, setTab] = useState('screenshot');
@@ -132,7 +143,142 @@ export default function App() {
     setStudyState(cur.id ? 'idle' : 'local');
   }, [store, persistStudy, showToast]);
 
-  useEffect(() => () => { clearTimeout(studyRef.current.timer); }, []);
+  useEffect(() => () => { clearTimeout(studyRef.current.timer); clearTimeout(flowRef.current.timer); }, []);
+
+  // ---- 플로우 자동 저장 ----
+  const persistFlow = useCallback(async () => {
+    const cur = flowRef.current;
+    clearTimeout(cur.timer);
+    if (!cur.dirty || !cur.data || !store) return;
+    cur.dirty = false;
+    setFlowState('saving');
+    try {
+      const saved = await store.saveFlow(cur.data);
+      setFlows((list) => { const rest = list.filter((f) => f.id !== saved.id); return [saved, ...rest]; });
+      setFlowState(cur.dirty ? 'dirty' : 'saved');
+    } catch (err) {
+      cur.dirty = true;
+      setFlowState('error');
+      if (!cur.errorShown) { cur.errorShown = true; showToast(`플로우 저장 실패: ${err.message}`, 'error'); }
+    }
+  }, [store, showToast]);
+
+  const updateFlow = useCallback((patch, { silent = false } = {}) => {
+    const cur = flowRef.current;
+    const prev = cur.data;
+    if (!prev) return;
+    const next = typeof patch === 'function' ? patch(prev) : patch;
+    cur.data = next;
+    setFlow(next);
+    if (silent) return; // 드래그 중에는 저장하지 않는다
+    cur.dirty = true;
+    setFlowState('dirty');
+    clearTimeout(cur.timer);
+    cur.timer = setTimeout(persistFlow, 900);
+  }, [persistFlow]);
+
+  const loadFlows = useCallback(async () => {
+    if (!store) return;
+    try {
+      setFlows((await store.listFlows()).map(normalizeFlow));
+    } catch (err) {
+      if (!flowsErrorShown.current) { flowsErrorShown.current = true; showToast(err.message, 'error'); }
+    }
+  }, [store, showToast]);
+
+  // 플로우 열기: 노드가 가리키는 레퍼런스 전체 row 와 학습 기록을 함께 읽는다
+  const openFlow = useCallback(async (f) => {
+    await persistFlow();
+    const data = normalizeFlow(f);
+    flowRef.current = { data, dirty: false, timer: null, errorShown: false };
+    setFlow(data);
+    setFlowState('idle');
+    setSelected(null);
+    setNotes([]);
+    const refs = {};
+    const studies = {};
+    await Promise.all(data.nodes.map(async (n) => {
+      try { refs[n.reference_id] = await store.getReference(n.reference_id); } catch { /* 삭제된 레퍼런스 */ }
+      try { studies[n.reference_id] = normalizeStudy(await store.getStudy(n.reference_id)); } catch { studies[n.reference_id] = normalizeStudy(null); }
+    }));
+    setFlowRefs(refs);
+    setFlowStudies(studies);
+  }, [store, persistFlow]);
+
+  // 플로우 노드가 가리키는 레퍼런스/학습 기록 중 아직 읽지 않은 것을 채운다 (라이브러리에서 추가한 노드 등)
+  const flowNodes = flow?.nodes;
+  useEffect(() => {
+    if (!flowNodes || !store) return undefined;
+    const ids = Array.from(new Set(flowNodes.map((n) => n.reference_id))).filter((id) => !(id in flowRefs) || !(id in flowStudies));
+    if (!ids.length) return undefined;
+    let cancelled = false;
+    (async () => {
+      const refs = {};
+      const studies = {};
+      await Promise.all(ids.map(async (id) => {
+        if (!(id in flowRefs)) { try { refs[id] = await store.getReference(id); } catch { refs[id] = null; } }
+        if (!(id in flowStudies)) { try { studies[id] = normalizeStudy(await store.getStudy(id)); } catch { studies[id] = normalizeStudy(null); } }
+      }));
+      if (cancelled) return;
+      if (Object.keys(refs).length) setFlowRefs((m) => ({ ...m, ...refs }));
+      if (Object.keys(studies).length) setFlowStudies((m) => ({ ...m, ...studies }));
+    })();
+    return () => { cancelled = true; };
+  }, [flowNodes, store, flowRefs, flowStudies]);
+
+  const newFlow = useCallback(async () => {
+    const f = { ...emptyFlow(`플로우 ${flows.length + 1}`), id: newId() };
+    try {
+      const saved = normalizeFlow(await store.saveFlow(f));
+      setFlows((list) => [saved, ...list]);
+      await openFlow(saved);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }, [store, flows.length, openFlow, showToast]);
+
+  const closeFlow = useCallback(async () => {
+    await persistFlow();
+    flowRef.current = { data: null, dirty: false, timer: null, errorShown: false };
+    setFlow(null);
+    setFlowState('idle');
+  }, [persistFlow]);
+
+  const deleteFlow = useCallback(async () => {
+    if (!flow) return;
+    if (!window.confirm(`플로우 "${flow.name || '이름 없음'}" 을 삭제할까요? 페이지(레퍼런스)는 남습니다.`)) return;
+    try {
+      clearTimeout(flowRef.current.timer);
+      flowRef.current = { data: null, dirty: false, timer: null, errorShown: false };
+      await store.deleteFlow(flow.id);
+      setFlows((list) => list.filter((f) => f.id !== flow.id));
+      setFlow(null);
+      setFlowState('idle');
+      showToast('플로우를 삭제했습니다.');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }, [store, flow, showToast]);
+
+  // 플로우가 열려 있으면 새로 분석한 페이지를 노드로 추가한다
+  const addNodeToFlow = useCallback((ref) => {
+    const cur = flowRef.current;
+    if (!cur.data || !ref || ref.unsaved) return;
+    if (cur.data.nodes.some((n) => n.reference_id === ref.id)) return;
+    setFlowRefs((m) => ({ ...m, [ref.id]: ref }));
+    setFlowStudies((m) => ({ ...m, [ref.id]: normalizeStudy(null) }));
+    updateFlow((prev) => ({ ...prev, nodes: [...prev.nodes, { id: uid(), reference_id: ref.id, ...nextNodePosition(prev.nodes) }] }));
+  }, [updateFlow]);
+
+  // 상세 학습에서 플로우 캔버스로 돌아가기 (바뀐 블록이 노드의 기능 단위에 바로 반영되도록 학습 기록을 넘긴다)
+  const backToFlow = useCallback(async () => {
+    await persistStudy();
+    const cur = studyRef.current;
+    if (cur.id && cur.data) setFlowStudies((m) => ({ ...m, [cur.id]: cur.data }));
+    if (selected && !selected.unsaved) setFlowRefs((m) => ({ ...m, [selected.id]: selected }));
+    setSelected(null);
+    setNotes([]);
+  }, [persistStudy, selected]);
 
   const refreshLibrary = useCallback(async () => {
     if (!store) return;
@@ -147,6 +293,7 @@ export default function App() {
   }, [store, showToast]);
 
   useEffect(() => { refreshLibrary(); }, [refreshLibrary]);
+  useEffect(() => { loadFlows(); }, [loadFlows]);
 
   // ---- 레퍼런스 선택 ----
   const selectReference = useCallback(async (ref) => {
@@ -169,12 +316,18 @@ export default function App() {
     try {
       await store.deleteReference(ref);
       if (selected?.id === ref.id) { setSelected(null); setNotes([]); setStudy(null); studyRef.current = { ...studyRef.current, id: null, data: null, dirty: false }; }
+      if (flowRef.current.data?.nodes.some((n) => n.reference_id === ref.id)) {
+        updateFlow((prev) => {
+          const gone = new Set(prev.nodes.filter((n) => n.reference_id === ref.id).map((n) => n.id));
+          return { ...prev, nodes: prev.nodes.filter((n) => !gone.has(n.id)), edges: prev.edges.filter((e) => !gone.has(e.from.node) && !gone.has(e.to.node)) };
+        });
+      }
       await refreshLibrary();
       showToast('삭제했습니다.');
     } catch (err) {
       showToast(err.message, 'error');
     }
-  }, [store, selected, refreshLibrary, showToast]);
+  }, [store, selected, refreshLibrary, updateFlow, showToast]);
 
   // 캡처 객체 → Claude 분석 → 저장 → 화면 표시 (자동 캡처와 직접 업로드가 공유)
   const analyzeAndSave = useCallback(async (capture, id) => {
@@ -200,9 +353,10 @@ export default function App() {
       setSelectedSectionId(GENERAL_SECTION.id);
       await openStudy(saved);
       setTab('draw');
+      addNodeToFlow(saved);
       await refreshLibrary();
-      if (!saved.unsaved) showToast('분석을 완료하고 저장했습니다. AI 결과는 가려 두었으니 먼저 직접 그려 보세요.');
-  }, [store, settings, refreshLibrary, openStudy, showToast]);
+      if (!saved.unsaved) showToast(flowRef.current.data ? '분석을 완료하고 플로우에 노드로 추가했습니다. 먼저 직접 그린 뒤 플로우로 돌아가 연결하세요.' : '분석을 완료하고 저장했습니다. AI 결과는 가려 두었으니 먼저 직접 그려 보세요.');
+  }, [store, settings, refreshLibrary, openStudy, addNodeToFlow, showToast]);
 
   // ---- 캡처 → 분석 → 저장 ----
   const runAnalysis = useCallback(async () => {
@@ -417,7 +571,12 @@ export default function App() {
           storeKind={store?.kind}
           onSelect={selectReference}
           onDelete={deleteReference}
-          onRefresh={refreshLibrary}
+          onRefresh={() => { refreshLibrary(); loadFlows(); }}
+          flows={flow ? flows.map((f) => (f.id === flow.id ? flow : f)) : flows}
+          currentFlowId={flow?.id}
+          onOpenFlow={openFlow}
+          onNewFlow={newFlow}
+          onCloseFlow={closeFlow}
         />
 
         <section className="workspace">
@@ -425,6 +584,9 @@ export default function App() {
             <>
               <div className="workspace__head">
                 <div className="workspace__title">
+                  {flow && (
+                    <button type="button" className="link flow-back" onClick={backToFlow}>← 플로우: {flow.name || '이름 없음'}</button>
+                  )}
                   <h1 title={selected.title}>{selected.title || selected.url}</h1>
                   <button type="button" className="link" onClick={() => bridge.openExternal(selected.url)} title="브라우저에서 열기">{selected.url}</button>
                 </div>
@@ -501,11 +663,26 @@ export default function App() {
                 )}
               </div>
             </>
+          ) : flow ? (
+            <>
+              {flowState !== 'idle' && STUDY_STATE_LABEL[flowState] && <span className={`save-state save-state--${flowState} flow__save-state`}>{STUDY_STATE_LABEL[flowState].replace('학습 기록', '플로우')}</span>}
+              <FlowCanvas
+                flow={flow}
+                refsById={flowRefs}
+                studiesById={flowStudies}
+                allReferences={references}
+                onChange={updateFlow}
+                onOpenNode={(ref) => selectReference(ref)}
+                onDeleteFlow={deleteFlow}
+                onToast={showToast}
+              />
+            </>
           ) : (
             <div className="workspace__empty">
               <h1>화면을 직접 분석하고, AI 와 비교해 보세요</h1>
               <p>위 입력창에 URL 을 넣고 <strong>분석 시작</strong>을 누르면 페이지를 캡처하고 Claude 가 정보구조·와이어프레임·UX 패턴을 정리합니다. 봇 차단 등으로 캡처가 안 되는 페이지는 브라우저에서 전체 페이지 스크린샷을 찍어 <strong>스크린샷 업로드</strong>로 분석하세요.</p>
               <p>AI 결과는 처음에 가려져 있습니다. <strong>내 와이어프레임</strong>에서 블록을 그리고(정보/컴포넌트 구분, 실제 문구, 상태 케이스), <strong>내 IA</strong>에서 정보를 묶은 뒤 AI 결과를 열어 <strong>비교·기록</strong> 탭에서 LinkedIn 초안을 만들 수 있습니다.</p>
+              <p>여러 페이지가 이어지는 서비스는 왼쪽 <strong>플로우</strong>에서 "새 플로우"를 만들어 페이지를 노드로 놓고, 기능 단위 블록에서 다음 페이지로 연결선을 그어 화면 흐름을 정리하세요.</p>
               {bridge.isElectron ? (
                 <ol>
                   <li>설정(⚙)에서 Anthropic API 키를 입력합니다.</li>

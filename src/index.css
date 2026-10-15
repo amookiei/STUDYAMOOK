@@ -338,3 +338,46 @@ textarea.input { resize: vertical; }
 .checks__mark { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #f1f3f5; color: var(--muted); font-size: 12px; font-weight: 700; }
 .checks__item--ok .checks__mark { background: #e6fcf5; color: #087f5b; }
 .export__draft { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; white-space: pre; margin-top: 8px; }
+
+/* ---------- 플로우 ---------- */
+.flows { padding: 0 14px 10px; border-bottom: 1px solid var(--border); margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+.flows__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+.flows__empty { margin: 0 0 4px; }
+.flow-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 6px 9px; border: 1px solid var(--border); border-radius: 8px; background: #fff; font: inherit; cursor: pointer; text-align: left; }
+.flow-item:hover { border-color: #c5cdd8; }
+.flow-item--active { border-color: var(--primary); background: #eef2ff; }
+.flow-item__name { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flow-back { font-size: 12px; margin-bottom: 2px; display: inline-block; }
+.flow { display: flex; flex-direction: column; height: 100%; }
+.flow__save-state { padding: 6px 18px 0; }
+.flow__toolbar { flex-wrap: wrap; row-gap: 6px; }
+.flow__name { width: 280px; font-weight: 650; }
+.flow__add { width: 260px; }
+.flow__body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 290px; }
+.flow__canvas-wrap { overflow: auto; background: #e9ecef; position: relative; touch-action: none; }
+.flow__canvas { position: relative; background-color: #f1f3f5; background-image: radial-gradient(#cfd4da 1px, transparent 1px); background-size: 24px 24px; }
+.flow__edges { position: absolute; inset: 0; pointer-events: none; }
+.flow-edge { pointer-events: visibleStroke; cursor: pointer; }
+.flow-edge text { pointer-events: none; }
+.flow-node { position: absolute; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); user-select: none; cursor: grab; display: flex; flex-direction: column; }
+.flow-node--selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(76, 110, 245, 0.25); }
+.flow-node--target { outline: 2px dashed #e03131; outline-offset: 3px; }
+.flow-node__head { padding: 8px 10px 4px; }
+.flow-node__title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flow-node__meta { font-size: 11px; }
+.flow-node__thumb { height: 110px; background: #f1f3f5; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.flow-node__thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.flow-node__badges { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 10px 2px; }
+.flow-node__units { padding: 4px 0 6px; }
+.flow-node__units-head { font-size: 11px; font-weight: 700; color: var(--muted); padding: 2px 10px; }
+.flow-node__empty { padding: 2px 10px; }
+.flow-unit { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 0 3px 10px; font-size: 12px; }
+.flow-unit__label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.port { width: 14px; height: 14px; margin-right: -7px; border-radius: 50%; background: var(--primary); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--primary); cursor: crosshair; flex: none; }
+.port:hover { transform: scale(1.3); }
+.port--ai { background: #adb5bd; box-shadow: 0 0 0 1px #adb5bd; }
+.flow-node__components { padding: 3px 10px; }
+.flow-node__open { margin: 4px 10px 10px; }
+.flow__empty { position: absolute; left: 40px; top: 40px; width: 520px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; box-shadow: var(--shadow); }
+.flow__empty h2 { font-size: 16px; margin-bottom: 8px; }
+.flow__side { overflow-y: auto; padding: 10px 14px; border-left: 1px solid var(--border); background: var(--panel); }

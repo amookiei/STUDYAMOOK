@@ -1,7 +1,7 @@
 // Supabase 가 설정되지 않았을 때 쓰는 로컬(IndexedDB) 저장소.
 // 같은 PC 안에서만 유지되며, Supabase 를 설정하면 그쪽이 우선된다.
 const DB_NAME = 'ux-reference-studio';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -14,6 +14,7 @@ function openDb() {
         notes.createIndex('reference_id', 'reference_id', { unique: false });
       }
       if (!db.objectStoreNames.contains('studies')) db.createObjectStore('studies', { keyPath: 'reference_id' });
+      if (!db.objectStoreNames.contains('flows')) db.createObjectStore('flows', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error || new Error('IndexedDB 를 열 수 없습니다.'));
@@ -121,4 +122,24 @@ export async function updateNote(id, body) {
 export async function deleteNote(id) {
   const db = await openDb();
   await tx(db, 'notes', 'readwrite', (s) => s.delete(id));
+}
+
+// ---------------- flows ----------------
+export async function listFlows() {
+  const db = await openDb();
+  const all = await tx(db, 'flows', 'readonly', (s) => s.getAll());
+  return (all || []).sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+}
+
+export async function saveFlow(flow) {
+  const db = await openDb();
+  const now = new Date().toISOString();
+  const row = { ...flow, created_at: flow.created_at || now, updated_at: now };
+  await tx(db, 'flows', 'readwrite', (s) => s.put(row));
+  return row;
+}
+
+export async function deleteFlow(id) {
+  const db = await openDb();
+  await tx(db, 'flows', 'readwrite', (s) => s.delete(id));
 }
