@@ -1,20 +1,22 @@
 // Supabase 데이터 접근 계층.
 // 테이블: references, notes / 스토리지 버킷: screenshots (supabase/schema.sql 참고)
 import { createClient } from '@supabase/supabase-js';
+import { resolveSupabase } from './config';
 
 export const SCREENSHOT_BUCKET = 'screenshots';
 
 let cached = { key: '', client: null };
 
 export function isSupabaseConfigured(settings) {
-  return Boolean(settings && settings.supabaseUrl && settings.supabaseAnonKey);
+  return Boolean(resolveSupabase(settings));
 }
 
 export function getSupabaseClient(settings) {
-  if (!isSupabaseConfigured(settings)) return null;
-  const key = `${settings.supabaseUrl}::${settings.supabaseAnonKey}`;
+  const resolved = resolveSupabase(settings);
+  if (!resolved) return null;
+  const key = `${resolved.url}::${resolved.anonKey}`;
   if (cached.key === key && cached.client) return cached.client;
-  const client = createClient(settings.supabaseUrl, settings.supabaseAnonKey, {
+  const client = createClient(resolved.url, resolved.anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   cached = { key, client };
@@ -137,7 +139,7 @@ export async function deleteNote(client, id) {
 
 export async function testSupabase(settings) {
   const client = getSupabaseClient(settings);
-  if (!client) throw new Error('Supabase URL 과 anon key 를 모두 입력해 주세요.');
+  if (!client) throw new Error('Supabase URL 과 anon key 를 모두 입력하거나, 환경 변수(VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)로 미리 설정해 주세요.');
   const { error } = await client.from('references').select('id', { count: 'exact', head: true });
   throwIf(error, 'Supabase 연결 실패');
   const { error: bucketError } = await client.storage.from(SCREENSHOT_BUCKET).list('', { limit: 1 });

@@ -25,7 +25,7 @@ npm run dev        # Vite 개발 서버(5173) + Electron 창
 앱이 뜨면 **⚙ 설정** 에서 다음을 입력합니다. 키는 코드에 포함되지 않고 사용자 데이터 폴더(`%APPDATA%\ux-reference-studio\settings.json`)에 저장되며, Windows 에서는 DPAPI 로 암호화됩니다.
 
 1. **Anthropic API 키** (필수) 와 모델 (기본 `claude-opus-5-5`) — https://console.anthropic.com 에서 발급
-2. **Supabase 프로젝트 URL + anon key** (선택). 비워 두면 결과가 이 PC(IndexedDB)에만 저장됩니다.
+2. **Supabase 프로젝트 URL + anon key** (선택). 비워 두면 결과가 이 PC(IndexedDB)에만 저장됩니다. 설치 파일을 빌드할 때 환경 변수로 미리 넣어 두었다면 입력하지 않아도 됩니다.
    - https://supabase.com 에서 새 프로젝트 생성 (무료 플랜으로 충분)
    - 좌측 **SQL Editor** → `supabase/schema.sql` 전체를 붙여넣고 Run → `references` / `notes` 테이블과 `screenshots` 버킷 생성
    - **Project Settings → API** 에서 `Project URL` 과 `anon public` 키 복사
@@ -84,9 +84,13 @@ GitHub 저장소를 Vercel 에 연결해 두면 푸시할 때마다 자동으로
    | --- | --- |
    | `ANTHROPIC_API_KEY` | Anthropic 콘솔에서 발급한 키. 브라우저에는 절대 내려가지 않고 서버 함수만 사용합니다. |
    | `STUDIO_CODE` | 나만 아는 입장 코드. 웹을 열면 이 코드를 입력해야 앱이 보이고, 모든 서버 호출에도 이 코드가 필요합니다. |
+   | `VITE_SUPABASE_URL` | (선택) Supabase Project URL. 넣어 두면 설정 화면에 입력할 필요가 없습니다. |
+   | `VITE_SUPABASE_ANON_KEY` | (선택) Supabase anon public 키. |
 2. 배포된 사이트를 열고 **입장 코드**를 입력합니다 (이 브라우저에만 저장되며, 상단 "잠금" 버튼으로 지울 수 있습니다).
-3. 설정(⚙)에서 **Supabase URL / anon key** 를 입력합니다. 스크린샷과 결과는 Supabase 에 저장됩니다(`supabase/schema.sql` 실행 필요).
+3. Supabase 환경 변수를 넣지 않았다면 설정(⚙)에서 **Supabase URL / anon key** 를 입력합니다. 스크린샷과 결과는 Supabase 에 저장됩니다(`supabase/schema.sql` 실행 필요).
 4. URL 을 입력하고 **분석 시작**. 서버에서 캡처(10~40초)와 Claude 분석(1~3분)이 차례로 진행됩니다.
+
+Supabase 환경 변수는 빌드 시점에 번들에 들어가므로(anon 키는 공개용 키입니다) 값을 바꾼 뒤에는 Redeploy 가 필요합니다. 설정 화면에 직접 입력한 값이 있으면 그 값이 환경 변수보다 우선합니다.
 
 서버리스 함수 구성:
 
@@ -106,6 +110,7 @@ GitHub 저장소를 Vercel 에 연결해 두면 푸시할 때마다 자동으로
 
 - 태그를 푸시하면(`git tag v0.1.0 && git push origin v0.1.0`) 빌드 후 GitHub **Release** 에 `.exe` 가 첨부됩니다.
 - Actions 탭 → "Windows installer" → **Run workflow** 로 수동 실행하면 Artifacts 에서 내려받을 수 있습니다.
+- 설치 파일에 Supabase 를 미리 넣으려면 저장소 Settings → Secrets and variables → Actions 에 Variable `VITE_SUPABASE_URL` 과 Secret `VITE_SUPABASE_ANON_KEY` 를 추가합니다. Anthropic 키는 설치 파일에 넣지 않습니다(앱 설정에서 입력).
 
 ## API 키 없이 쓸 수 있나?
 

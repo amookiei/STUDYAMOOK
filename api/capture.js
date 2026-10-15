@@ -76,7 +76,13 @@ module.exports = async (req, res) => {
   }
   let supabase;
   try {
-    supabase = createServerClient(body.supabase);
+    // 요청에 없으면 서버 환경 변수(SUPABASE_URL / SUPABASE_ANON_KEY 또는 VITE_ 접두사)를 쓴다.
+    const fromEnv = {
+      url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '',
+      anonKey: process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '',
+    };
+    const config = body.supabase && body.supabase.url && body.supabase.anonKey ? body.supabase : fromEnv;
+    supabase = createServerClient(config);
   } catch (err) {
     return fail(res, 400, `${err.message} 웹에서 분석하려면 설정에서 Supabase 를 먼저 연결해 주세요.`);
   }

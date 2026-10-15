@@ -25,10 +25,14 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      # Supabase 를 설치 파일에 미리 넣으려면 저장소 Settings → Secrets and variables → Actions 에
+      # Variables: VITE_SUPABASE_URL, Secrets: VITE_SUPABASE_ANON_KEY 를 추가한다 (없으면 앱에서 직접 입력).
       - name: Build installer
         run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

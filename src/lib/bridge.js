@@ -3,6 +3,8 @@
 //  - 설정(Supabase 정보, 모델)은 localStorage 에 저장
 //  - 입장 코드(서버 환경 변수 STUDIO_CODE)를 통과해야 앱이 열리며, 모든 /api 호출에 그 코드를 헤더로 보낸다
 //  - 캡처/분석은 Vercel 서버리스 함수(/api/capture, /api/analyze)를 호출. Anthropic 키는 서버 환경 변수에만 있다.
+import { resolveSupabase } from './config';
+
 const WEB_SETTINGS_KEY = 'ux-reference-studio.settings';
 const CODE_KEY = 'ux-reference-studio.code';
 const CODE_HEADER = 'x-studio-code';
@@ -85,7 +87,8 @@ const fallback = {
   clearStudioCode: () => writeCode(''),
   capturePage: async (url, options = {}) => {
     const settings = readWebSettings();
-    if (!settings.supabaseUrl || !settings.supabaseAnonKey) {
+    const supabase = resolveSupabase(settings);
+    if (!supabase) {
       throw new Error('웹에서 분석하려면 설정(⚙)에서 Supabase URL 과 anon key 를 먼저 입력해 주세요. 스크린샷이 Supabase 스토리지에 저장됩니다.');
     }
     emitProgress({ stage: 'capture', message: '서버에서 페이지를 렌더링하고 스크린샷을 찍는 중… (10~40초)' });
@@ -93,7 +96,7 @@ const fallback = {
       method: 'POST',
       body: {
         url,
-        supabase: { url: settings.supabaseUrl, anonKey: settings.supabaseAnonKey },
+        supabase: { url: supabase.url, anonKey: supabase.anonKey },
         width: options.width || settings.captureWidth,
         maxHeight: options.maxHeight || settings.captureMaxHeight,
       },

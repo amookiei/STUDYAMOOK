@@ -38,7 +38,8 @@ async function launchBrowser() {
   if (override) {
     return playwright.launch({ executablePath: override, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   }
-  const mod = require('@sparticuz/chromium');
+  // @sparticuz/chromium 은 ESM 전용 패키지라 CommonJS 에서는 동적 import() 로 불러와야 한다.
+  const mod = await import('@sparticuz/chromium');
   const chromium = mod.default || mod;
   const [executablePath] = await Promise.all([chromium.executablePath(), ensureFonts()]);
   return playwright.launch({ executablePath, headless: true, args: [...chromium.args, '--disable-dev-shm-usage'] });
