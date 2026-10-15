@@ -18,6 +18,9 @@ export function createStore(settings) {
       uploadScreenshotBlob: (id, blob) => supa.uploadScreenshotBlob(client, id, blob),
       getStudy: (refId) => supa.getStudy(client, refId),
       saveStudy: (refId, study) => supa.saveStudy(client, refId, study),
+      listFlows: () => supa.listFlows(client),
+      saveFlow: (flow) => supa.saveFlow(client, flow),
+      deleteFlow: (id) => supa.deleteFlow(client, id),
     };
   }
   return {
@@ -32,6 +35,9 @@ export function createStore(settings) {
     deleteNote: local.deleteNote,
     getStudy: local.getStudy,
     saveStudy: local.saveStudy,
+    listFlows: local.listFlows,
+    saveFlow: local.saveFlow,
+    deleteFlow: local.deleteFlow,
   };
 }
 

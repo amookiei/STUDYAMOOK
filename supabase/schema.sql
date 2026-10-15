@@ -55,6 +55,17 @@ create table if not exists public.studies (
   updated_at    timestamptz not null default now()
 );
 
+-- ---------------------------------------------------------------------------
+-- flows: 여러 페이지(레퍼런스)를 노드로 잇는 화면 흐름. data 구조는 src/lib/flow.js 의 normalizeFlow() 참고
+-- ---------------------------------------------------------------------------
+create table if not exists public.flows (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null default '',
+  data        jsonb not null default '{}'::jsonb,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
 -- updated_at 자동 갱신
 create or replace function public.set_updated_at()
 returns trigger language plpgsql as $$
@@ -76,12 +87,17 @@ drop trigger if exists studies_set_updated_at on public.studies;
 create trigger studies_set_updated_at before update on public.studies
   for each row execute function public.set_updated_at();
 
+drop trigger if exists flows_set_updated_at on public.flows;
+create trigger flows_set_updated_at before update on public.flows
+  for each row execute function public.set_updated_at();
+
 -- ---------------------------------------------------------------------------
 -- RLS: anon 역할 허용 (개인용)
 -- ---------------------------------------------------------------------------
 alter table public."references" enable row level security;
 alter table public.notes enable row level security;
 alter table public.studies enable row level security;
+alter table public.flows enable row level security;
 
 drop policy if exists "references anon all" on public."references";
 create policy "references anon all" on public."references"
@@ -93,6 +109,10 @@ create policy "notes anon all" on public.notes
 
 drop policy if exists "studies anon all" on public.studies;
 create policy "studies anon all" on public.studies
+  for all to anon, authenticated using (true) with check (true);
+
+drop policy if exists "flows anon all" on public.flows;
+create policy "flows anon all" on public.flows
   for all to anon, authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------

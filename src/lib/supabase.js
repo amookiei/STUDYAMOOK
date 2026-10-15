@@ -1,5 +1,5 @@
 // Supabase 데이터 접근 계층.
-// 테이블: references, notes, studies / 스토리지 버킷: screenshots (supabase/schema.sql 참고)
+// 테이블: references, notes, studies, flows / 스토리지 버킷: screenshots (supabase/schema.sql 참고)
 import { createClient } from '@supabase/supabase-js';
 import { resolveSupabase } from './config';
 
@@ -164,6 +164,29 @@ export async function saveStudy(client, referenceId, study) {
   return data ? data.data : study;
 }
 
+// ---------------- flows (여러 페이지를 잇는 화면 흐름) ----------------
+export async function listFlows(client) {
+  const { data, error } = await client.from('flows').select('id, name, data, created_at, updated_at').order('updated_at', { ascending: false });
+  throwIf(error, '플로우 목록을 불러오지 못했습니다');
+  return (data || []).map((row) => ({ ...row.data, id: row.id, name: row.name, created_at: row.created_at, updated_at: row.updated_at }));
+}
+
+export async function saveFlow(client, flow) {
+  const { id, created_at, updated_at, ...data } = flow;
+  const { data: row, error } = await client
+    .from('flows')
+    .upsert({ id, name: flow.name || '', data, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+    .select('id, name, data, created_at, updated_at')
+    .single();
+  throwIf(error, '플로우 저장에 실패했습니다');
+  return { ...row.data, id: row.id, name: row.name, created_at: row.created_at, updated_at: row.updated_at };
+}
+
+export async function deleteFlow(client, id) {
+  const { error } = await client.from('flows').delete().eq('id', id);
+  throwIf(error, '플로우 삭제에 실패했습니다');
+}
+
 export async function testSupabase(settings) {
   const client = getSupabaseClient(settings);
   if (!client) throw new Error('Supabase URL 과 anon key 를 모두 입력하거나, 환경 변수(VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)로 미리 설정해 주세요.');
@@ -171,6 +194,8 @@ export async function testSupabase(settings) {
   throwIf(error, 'Supabase 연결 실패');
   const { error: studiesError } = await client.from('studies').select('reference_id', { count: 'exact', head: true });
   throwIf(studiesError, 'studies 테이블 확인 실패 (schema.sql 을 다시 실행하면 추가됩니다)');
+  const { error: flowsError } = await client.from('flows').select('id', { count: 'exact', head: true });
+  throwIf(flowsError, 'flows 테이블 확인 실패 (schema.sql 을 다시 실행하면 추가됩니다)');
   const { error: bucketError } = await client.storage.from(SCREENSHOT_BUCKET).list('', { limit: 1 });
   if (bucketError) throw new Error(`"${SCREENSHOT_BUCKET}" 버킷에 접근할 수 없습니다: ${bucketError.message}`);
   return true;
